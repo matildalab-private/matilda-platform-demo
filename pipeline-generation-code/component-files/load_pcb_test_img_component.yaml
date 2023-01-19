@@ -1,0 +1,39 @@
+name: Load test img
+outputs:
+- {name: input_img, type: jpg}
+implementation:
+  container:
+    image: python:3.7
+    command:
+    - sh
+    - -c
+    - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+      'gdown' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+      'gdown' --user) && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - |
+      def _make_parent_dirs_and_return_path(file_path: str):
+          import os
+          os.makedirs(os.path.dirname(file_path), exist_ok=True)
+          return file_path
+
+      def load_test_img(input_img):
+          import gdown
+          img_url = 'https://drive.google.com/file/d/13SNqfX3z8N1-qt4PwaS4RL0O2SydN09j/view?usp=sharing'
+          gdown.download(img_url, output=input_img, quiet=True, fuzzy=True)
+          print(f'download complete!')
+
+      import argparse
+      _parser = argparse.ArgumentParser(prog='Load test img', description='')
+      _parser.add_argument("--input-img", dest="input_img", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+      _parsed_args = vars(_parser.parse_args())
+
+      _outputs = load_test_img(**_parsed_args)
+    args:
+    - --input-img
+    - {outputPath: input_img}

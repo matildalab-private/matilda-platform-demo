@@ -1,0 +1,39 @@
+name: Load train data
+outputs:
+- {name: train_dataset, type: Dataset}
+implementation:
+  container:
+    image: python:3.7
+    command:
+    - sh
+    - -c
+    - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+      'gdown' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+      'gdown' --user) && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - |
+      def _make_parent_dirs_and_return_path(file_path: str):
+          import os
+          os.makedirs(os.path.dirname(file_path), exist_ok=True)
+          return file_path
+
+      def load_train_data(train_dataset):
+          import gdown
+          dataset_url = 'https://drive.google.com/file/d/1qn0mLFV7NBbmw6-ZTuF_tN_oJxRHx-XR/view?usp=share_link'
+          gdown.download(dataset_url, output=train_dataset, quiet=True, fuzzy=True)
+          print(f'download complete!')
+
+      import argparse
+      _parser = argparse.ArgumentParser(prog='Load train data', description='')
+      _parser.add_argument("--train-dataset", dest="train_dataset", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+      _parsed_args = vars(_parser.parse_args())
+
+      _outputs = load_train_data(**_parsed_args)
+    args:
+    - --train-dataset
+    - {outputPath: train_dataset}
