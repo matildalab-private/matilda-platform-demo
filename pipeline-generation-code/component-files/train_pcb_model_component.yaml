@@ -53,7 +53,7 @@ implementation:
       \        tf.cast(grid_size, tf.float32)\n        box_wh = tf.exp(box_wh) * anchors\n\
       \n        box_x1y1 = box_xy - box_wh / 2\n        box_x2y2 = box_xy + box_wh\
       \ / 2\n        bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)\n\n        return\
-      \ bbox, objectness, class_probs, pred_box\n\n    def YoloLoss(anchors, classes=2,\
+      \ bbox, objectness, class_probs, pred_box\n\n    def YoloLoss(anchors, classes=6,\
       \ ignore_thresh=0.5):\n        def yolo_loss(y_true, y_pred):\n            #\
       \ 1. transform all pred outputs\n            # y_pred: (batch_size, grid, grid,\
       \ anchors, (x, y, w, h, obj, ...cls))\n            pred_box, pred_obj, pred_class,\
@@ -109,7 +109,7 @@ implementation:
       \                            labels], axis=1)\n\n        paddings = [[0, 100\
       \ - tf.shape(y_train)[0]], [0, 0]]\n        y_train = tf.pad(y_train, paddings)\n\
       \n        return x_train, y_train\n\n    def load_tfrecord_dataset(file_pattern,\
-      \ size=256):\n        keys_tensor = tf.constant(['missing_hole', 'mouse_bite',\
+      \ size=416):\n        keys_tensor = tf.constant(['missing_hole', 'mouse_bite',\
       \ 'open_circuit', 'short', 'spur', 'spurious_copper'])\n        vals_tensor\
       \ = tf.constant([0, 1, 2, 3, 4, 5])\n        init = tf.lookup.KeyValueTensorInitializer(keys_tensor,\
       \ vals_tensor)\n        class_table = tf.lookup.StaticHashTable(init, default_value=-1)\n\
@@ -160,15 +160,13 @@ implementation:
       \ = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])\n\n    train_dataset = load_tfrecord_dataset(train_dataset)\n\
       \    train_dataset = train_dataset.shuffle(buffer_size=512)\n    train_dataset\
       \ = train_dataset.batch(8)\n    train_dataset = train_dataset.map(lambda x,\
-      \ y: (\n        transform_images(x, 256),\n        transform_targets(y, anchors,\
-      \ anchor_masks, 256)))\n    train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\
+      \ y: (\n        transform_images(x, 416),\n        transform_targets(y, anchors,\
+      \ anchor_masks, 416)))\n    train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\
       \n    model = tf.keras.models.load_model(loaded_model, custom_objects={'yolo_loss':[[YoloLoss(anchors[mask],\
-      \ classes=2) for mask in anchor_masks]]})\n\n    callbacks = [\n        ReduceLROnPlateau(verbose=1),\n\
-      \        EarlyStopping(patience=5, verbose=1),\n        ModelCheckpoint(\n \
-      \           filepath=trained_weights+'/trained_weights.tf',\n            save_weights_only=True,\n\
-      \            monitor='val_loss',\n            mode='min',\n            save_best_only=True\n\
-      \        )\n    ]\n\n    import os\n    os.mkdir(trained_weights)\n\n    model.fit(train_dataset,\
-      \ epochs=1, callbacks=callbacks)    \n\n    print(os.listdir('tmp/outputs/trained_weights/'))\n\
+      \ classes=6) for mask in anchor_masks]]})\n\n    callbacks = [\n        ReduceLROnPlateau(verbose=1),\n\
+      \        EarlyStopping(patience=5, verbose=1),\n    ]\n\n    import os\n   \
+      \ os.mkdir(trained_weights)\n\n    model.fit(train_dataset, epochs=1, callbacks=callbacks)\
+      \    \n    model.save_weights(trained_weights+'/trained_weights.tf')\n    print(os.listdir('tmp/outputs/trained_weights/data/'))\n\
       \nimport argparse\n_parser = argparse.ArgumentParser(prog='Train model', description='')\n\
       _parser.add_argument(\"--train-dataset\", dest=\"train_dataset\", type=str,\
       \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--loaded-model\"\

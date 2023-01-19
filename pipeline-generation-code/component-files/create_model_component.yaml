@@ -47,8 +47,8 @@ implementation:
               sparse_categorical_crossentropy
           )
 
-          SIZE = 256
-          NUM_CLASSES = 2
+          SIZE = 416
+          NUM_CLASSES = 6
           LEARNING_RATE = 1e-3
 
           def broadcast_iou(box_1, box_2):
@@ -234,7 +234,7 @@ implementation:
               return boxes, scores, classes, valid_detections
 
           class YoloBoxLayer(Layer):
-              def __init__(self, anchors, classes=2, name=None):
+              def __init__(self, anchors, classes=NUM_CLASSES, name=None):
                   super(YoloBoxLayer, self).__init__(name=name)
                   self.anchors = anchors
                   self.classes = classes
@@ -253,7 +253,7 @@ implementation:
                   return yolo_nms(inputs, self.anchors, self.masks, self.classes)
 
           def YoloV3(size=None, channels=3, anchors=yolo_anchors,
-                 masks=yolo_anchor_masks, classes=2, training=False):
+                 masks=yolo_anchor_masks, classes=NUM_CLASSES, training=False):
 
               x = inputs = Input([size, size, channels], name='input')
 
@@ -351,6 +351,9 @@ implementation:
 
           model_p = YoloV3(SIZE, classes=NUM_CLASSES)
           model_p.save(prediction_model)
+
+          model_p.summary()
+          model_t.summary()
 
       import argparse
       _parser = argparse.ArgumentParser(prog='Create model', description='')

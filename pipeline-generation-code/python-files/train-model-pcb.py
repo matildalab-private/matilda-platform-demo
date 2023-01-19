@@ -72,7 +72,7 @@ def train_model(
 
         return bbox, objectness, class_probs, pred_box
 
-    def YoloLoss(anchors, classes=2, ignore_thresh=0.5):
+    def YoloLoss(anchors, classes=6, ignore_thresh=0.5):
         def yolo_loss(y_true, y_pred):
             # 1. transform all pred outputs
             # y_pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...cls))
@@ -160,7 +160,7 @@ def train_model(
 
         return x_train, y_train
 
-    def load_tfrecord_dataset(file_pattern, size=256):
+    def load_tfrecord_dataset(file_pattern, size=416):
         keys_tensor = tf.constant(['missing_hole', 'mouse_bite', 'open_circuit', 'short', 'spur', 'spurious_copper'])
         vals_tensor = tf.constant([0, 1, 2, 3, 4, 5])
         init = tf.lookup.KeyValueTensorInitializer(keys_tensor, vals_tensor)
@@ -252,31 +252,24 @@ def train_model(
     train_dataset = train_dataset.shuffle(buffer_size=512)
     train_dataset = train_dataset.batch(8)
     train_dataset = train_dataset.map(lambda x, y: (
-        transform_images(x, 256),
-        transform_targets(y, anchors, anchor_masks, 256)))
+        transform_images(x, 416),
+        transform_targets(y, anchors, anchor_masks, 416)))
     train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
 
-    model = tf.keras.models.load_model(loaded_model, custom_objects={'yolo_loss':[[YoloLoss(anchors[mask], classes=2) for mask in anchor_masks]]})
+    model = tf.keras.models.load_model(loaded_model, custom_objects={'yolo_loss':[[YoloLoss(anchors[mask], classes=6) for mask in anchor_masks]]})
 
     callbacks = [
         ReduceLROnPlateau(verbose=1),
         EarlyStopping(patience=5, verbose=1),
-        ModelCheckpoint(
-            filepath=trained_weights+'/trained_weights.tf',
-            save_weights_only=True,
-            monitor='val_loss',
-            mode='min',
-            save_best_only=True
-        )
     ]
 
     import os
     os.mkdir(trained_weights)
 
     model.fit(train_dataset, epochs=1, callbacks=callbacks)    
-
-    print(os.listdir('tmp/outputs/trained_weights/'))
+    model.save_weights(trained_weights+'/trained_weights.tf')
+    print(os.listdir('tmp/outputs/trained_weights/data/'))
 
 components.create_component_from_func(
     train_model,

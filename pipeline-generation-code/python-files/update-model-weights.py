@@ -68,7 +68,7 @@ def update_model_weights(
 
         return bbox, objectness, class_probs, pred_box
 
-    def YoloLoss(anchors, classes=2, ignore_thresh=0.5):
+    def YoloLoss(anchors, classes=6, ignore_thresh=0.5):
         def yolo_loss(y_true, y_pred):
             # 1. transform all pred outputs
             # y_pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...cls))
@@ -132,9 +132,11 @@ def update_model_weights(
                          (59, 119), (116, 90), (156, 198), (373, 326)],
                         np.float32) / 416
     yolo_anchor_masks = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
+    import os
+    print(f'model : {os.listdir(pretrained_weights)}')
 
-    model = tf.keras.models.load_model(compiled_model, custom_objects={'yolo_loss':[[YoloLoss(yolo_anchors[mask], classes=2) for mask in yolo_anchor_masks]]})
-    model.load_weights(pretrained_weights+'/axial_ckpt.tf')
+    model = tf.keras.models.load_model(compiled_model, custom_objects={'yolo_loss':[[YoloLoss(yolo_anchors[mask], classes=6) for mask in yolo_anchor_masks]]})
+    model.load_weights(pretrained_weights+'/yolov3_train_30.tf')
     model.save(loaded_model)
 
 components.create_component_from_func(

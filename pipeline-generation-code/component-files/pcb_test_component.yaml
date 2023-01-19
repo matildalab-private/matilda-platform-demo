@@ -60,11 +60,15 @@ implementation:
           model.load_weights(trained_weights+'/trained_weights.tf')
           print('trained weights loaded')
 
+          model.summary()
+
           class_names = ['missing_hole', 'mouse_bite', 'open_circuit', 'short', 'spur', 'spurious_copper']
 
           img_raw = tf.image.decode_image(open(input_img, 'rb').read(), channels=3)
           img = tf.expand_dims(img_raw, 0)
-          img = transform_images(img, 256)
+          img = transform_images(img, 416)
+
+          print(f'img shape : {img.shape}')
 
           boxes, scores, classes, nums = model(img)
           print('inference done')

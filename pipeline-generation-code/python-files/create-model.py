@@ -25,8 +25,8 @@ def create_model(compiled_model: OutputPath('TFModel'), prediction_model: Output
         sparse_categorical_crossentropy
     )
 
-    SIZE = 256
-    NUM_CLASSES = 2
+    SIZE = 416
+    NUM_CLASSES = 6
     LEARNING_RATE = 1e-3
 
     def broadcast_iou(box_1, box_2):
@@ -214,7 +214,7 @@ def create_model(compiled_model: OutputPath('TFModel'), prediction_model: Output
         return boxes, scores, classes, valid_detections
 
     class YoloBoxLayer(Layer):
-        def __init__(self, anchors, classes=2, name=None):
+        def __init__(self, anchors, classes=NUM_CLASSES, name=None):
             super(YoloBoxLayer, self).__init__(name=name)
             self.anchors = anchors
             self.classes = classes
@@ -234,7 +234,7 @@ def create_model(compiled_model: OutputPath('TFModel'), prediction_model: Output
 
 
     def YoloV3(size=None, channels=3, anchors=yolo_anchors,
-           masks=yolo_anchor_masks, classes=2, training=False):
+           masks=yolo_anchor_masks, classes=NUM_CLASSES, training=False):
 
         x = inputs = Input([size, size, channels], name='input')
 
@@ -332,6 +332,9 @@ def create_model(compiled_model: OutputPath('TFModel'), prediction_model: Output
 
     model_p = YoloV3(SIZE, classes=NUM_CLASSES)
     model_p.save(prediction_model)
+
+    model_p.summary()
+    model_t.summary()
 
 components.create_component_from_func(
     create_model,

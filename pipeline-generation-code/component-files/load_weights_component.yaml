@@ -24,9 +24,10 @@ implementation:
 
       def load_weights(pretrained_weights):
           import gdown
-          checkpoint_url = 'https://drive.google.com/drive/folders/1-C3N6h-CtdojHjEyFvXGXBorDFBo_k4z?usp=share_link'
+          checkpoint_url = 'https://drive.google.com/drive/folders/1btey4JhgBRkoJneGKkvBLTDAuOMfPNmV?usp=share_link'
           gdown.download_folder(checkpoint_url, output=pretrained_weights, quiet=True, use_cookies=False)
           print(f'download complete!')
+          print(f'checkpoint_url')
 
       import argparse
       _parser = argparse.ArgumentParser(prog='Load weights', description='')
