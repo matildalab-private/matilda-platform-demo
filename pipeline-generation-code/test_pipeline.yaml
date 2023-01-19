@@ -1,0 +1,1564 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: test-yolov3-pipeline-
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.13, pipelines.kubeflow.org/pipeline_compilation_time: '2023-01-19T15:28:47.757991',
+    pipelines.kubeflow.org/pipeline_spec: '{"name": "test YOLOv3 pipeline"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.13}
+spec:
+  entrypoint: test-yolov3-pipeline
+  templates:
+  - name: create-model
+    container:
+      args: [--compiled-model, /tmp/outputs/compiled_model/data, --prediction-model,
+        /tmp/outputs/prediction_model/data]
+      command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+        'numpy' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+        --no-warn-script-location 'numpy' --user) && "$0" "$@"
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def create_model(compiled_model, prediction_model):
+            import json
+            import numpy as np
+            import tensorflow as tf
+            from tensorflow.keras import Model
+            from tensorflow.keras.layers import (
+                Layer,
+                Add,
+                Concatenate,
+                Conv2D,
+                Input,
+                Lambda,
+                LeakyReLU,
+                MaxPool2D,
+                UpSampling2D,
+                ZeroPadding2D,
+                BatchNormalization,
+            )
+            from tensorflow.keras.regularizers import l2
+            from tensorflow.keras.losses import (
+                binary_crossentropy,
+                sparse_categorical_crossentropy
+            )
+
+            SIZE = 256
+            NUM_CLASSES = 2
+            LEARNING_RATE = 1e-3
+
+            def broadcast_iou(box_1, box_2):
+                # box_1: (..., (x1, y1, x2, y2))
+                # box_2: (N, (x1, y1, x2, y2))
+
+                # broadcast boxes
+                box_1 = tf.expand_dims(box_1, -2)
+                box_2 = tf.expand_dims(box_2, 0)
+                # new_shape: (..., N, (x1, y1, x2, y2))
+                new_shape = tf.broadcast_dynamic_shape(tf.shape(box_1), tf.shape(box_2))
+                box_1 = tf.broadcast_to(box_1, new_shape)
+                box_2 = tf.broadcast_to(box_2, new_shape)
+
+                int_w = tf.maximum(tf.minimum(box_1[..., 2], box_2[..., 2]) -
+                                tf.maximum(box_1[..., 0], box_2[..., 0]), 0)
+                int_h = tf.maximum(tf.minimum(box_1[..., 3], box_2[..., 3]) -
+                                tf.maximum(box_1[..., 1], box_2[..., 1]), 0)
+                int_area = int_w * int_h
+                box_1_area = (box_1[..., 2] - box_1[..., 0]) * \
+                    (box_1[..., 3] - box_1[..., 1])
+                box_2_area = (box_2[..., 2] - box_2[..., 0]) * \
+                    (box_2[..., 3] - box_2[..., 1])
+                return int_area / (box_1_area + box_2_area - int_area)
+
+            yolo_anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),(59, 119), (116, 90), (156, 198), (373, 326)], np.float32) / 416
+            yolo_anchor_masks = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
+
+            def DarknetConv(x, filters, size, strides=1, batch_norm=True):
+                if strides == 1:
+                    padding = 'same'
+                else:
+                    x = ZeroPadding2D(((1, 0), (1, 0)))(x)  # top left half-padding
+                    padding = 'valid'
+                x = Conv2D(filters=filters, kernel_size=size,
+                        strides=strides, padding=padding,
+                        use_bias=not batch_norm, kernel_regularizer=l2(0.0005))(x)
+                if batch_norm:
+                    x = BatchNormalization()(x)
+                    x = LeakyReLU(alpha=0.1)(x)
+                return x
+
+            def DarknetResidual(x, filters):
+                prev = x
+                x = DarknetConv(x, filters // 2, 1)
+                x = DarknetConv(x, filters, 3)
+                x = Add()([prev, x])
+                return x
+
+            def DarknetBlock(x, filters, blocks):
+                x = DarknetConv(x, filters, 3, strides=2)
+                for _ in range(blocks):
+                    x = DarknetResidual(x, filters)
+                return x
+
+            def Darknet(name=None):
+                x = inputs = Input([None, None, 3])
+                x = DarknetConv(x, 32, 3)
+                x = DarknetBlock(x, 64, 1)
+                x = DarknetBlock(x, 128, 2)  # skip connection
+                x = x_36 = DarknetBlock(x, 256, 8)  # skip connection
+                x = x_61 = DarknetBlock(x, 512, 8)
+                x = DarknetBlock(x, 1024, 4)
+                return Model(inputs, (x_36, x_61, x), name=name)
+
+            def YoloConv(filters, name=None):
+                def yolo_conv(x_in):
+                    if isinstance(x_in, tuple):
+                        inputs = Input(x_in[0].shape[1:]), Input(x_in[1].shape[1:])
+                        x, x_skip = inputs
+
+                        # concat with skip connection
+                        x = DarknetConv(x, filters, 1)
+                        x = UpSampling2D(2)(x)
+                        x = Concatenate()([x, x_skip])
+                    else:
+                        x = inputs = Input(x_in.shape[1:])
+
+                    x = DarknetConv(x, filters, 1)
+                    x = DarknetConv(x, filters * 2, 3)
+                    x = DarknetConv(x, filters, 1)
+                    x = DarknetConv(x, filters * 2, 3)
+                    x = DarknetConv(x, filters, 1)
+                    return Model(inputs, x, name=name)(x_in)
+                return yolo_conv
+
+            class ReshapeLayer(Layer):
+                def __init__(self, anchors, classes):
+                    super(ReshapeLayer, self).__init__()
+                    self.anchors = anchors
+                    self.classes = classes
+
+                def call(self, inputs):
+                    return tf.reshape(inputs, (-1, tf.shape(inputs)[1], tf.shape(inputs)[2], self.anchors, self.classes + 5))
+
+            def YoloOutput(filters, anchors, classes, name=None):
+                def yolo_output(x_in):
+                    x = inputs = Input(x_in.shape[1:])
+                    x = DarknetConv(x, filters * 2, 3)
+                    x = DarknetConv(x, anchors * (classes + 5), 1, batch_norm=False)
+                    # x = Lambda(lambda x: tf.reshape(x, (-1, tf.shape(x)[1], tf.shape(x)[2], anchors, classes + 5)))(x)
+                    x = ReshapeLayer(anchors, classes)(x)
+                    return Model(inputs, x, name=name)(x_in)
+                return yolo_output
+
+            def _meshgrid(n_a, n_b):
+                return [
+                    tf.reshape(tf.tile(tf.range(n_a), [n_b]), (n_b, n_a)),
+                    tf.reshape(tf.repeat(tf.range(n_b), n_a), (n_b, n_a))
+                ]
+
+            def yolo_boxes(pred, anchors, classes):
+                # pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))
+                grid_size = tf.shape(pred)[1:3]
+                box_xy, box_wh, objectness, class_probs = tf.split(
+                    pred, (2, 2, 1, classes), axis=-1)
+
+                box_xy = tf.sigmoid(box_xy)
+                objectness = tf.sigmoid(objectness)
+                class_probs = tf.sigmoid(class_probs)
+                pred_box = tf.concat((box_xy, box_wh), axis=-1)  # original xywh for loss
+
+                # !!! grid[x][y] == (y, x)
+                grid = _meshgrid(grid_size[1],grid_size[0])
+                grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)  # [gx, gy, 1, 2]
+
+                box_xy = (box_xy + tf.cast(grid, tf.float32)) / \
+                    tf.cast(grid_size, tf.float32)
+                box_wh = tf.exp(box_wh) * anchors
+
+                box_x1y1 = box_xy - box_wh / 2
+                box_x2y2 = box_xy + box_wh / 2
+                bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)
+
+                return bbox, objectness, class_probs, pred_box
+
+            def yolo_nms(outputs, anchors, masks, classes):
+                # boxes, conf, type
+                b, c, t = [], [], []
+
+                for o in outputs:
+                    b.append(tf.reshape(o[0], (tf.shape(o[0])[0], -1, tf.shape(o[0])[-1])))
+                    c.append(tf.reshape(o[1], (tf.shape(o[1])[0], -1, tf.shape(o[1])[-1])))
+                    t.append(tf.reshape(o[2], (tf.shape(o[2])[0], -1, tf.shape(o[2])[-1])))
+
+                bbox = tf.concat(b, axis=1)
+                confidence = tf.concat(c, axis=1)
+                class_probs = tf.concat(t, axis=1)
+
+                # If we only have one class, do not multiply by class_prob (always 0.5)
+                if classes == 1:
+                    scores = confidence
+                else:
+                    scores = confidence * class_probs
+
+                dscores = tf.squeeze(scores, axis=0)
+                scores = tf.reduce_max(dscores,[1])
+                bbox = tf.reshape(bbox,(-1,4))
+                classes = tf.argmax(dscores,1)
+                selected_indices, selected_scores = tf.image.non_max_suppression_with_scores(
+                    boxes=bbox,
+                    scores=scores,
+                    max_output_size=100,
+                    iou_threshold=0.5,
+                    score_threshold=0.5,
+                    soft_nms_sigma=0.5
+                )
+
+                num_valid_nms_boxes = tf.shape(selected_indices)[0]
+
+                selected_indices = tf.concat([selected_indices,tf.zeros(100-num_valid_nms_boxes, tf.int32)], 0)
+                selected_scores = tf.concat([selected_scores,tf.zeros(100-num_valid_nms_boxes,tf.float32)], -1)
+
+                boxes=tf.gather(bbox, selected_indices)
+                boxes = tf.expand_dims(boxes, axis=0)
+                scores=selected_scores
+                scores = tf.expand_dims(scores, axis=0)
+                classes = tf.gather(classes,selected_indices)
+                classes = tf.expand_dims(classes, axis=0)
+                valid_detections=num_valid_nms_boxes
+                valid_detections = tf.expand_dims(valid_detections, axis=0)
+
+                return boxes, scores, classes, valid_detections
+
+            class YoloBoxLayer(Layer):
+                def __init__(self, anchors, classes=2, name=None):
+                    super(YoloBoxLayer, self).__init__(name=name)
+                    self.anchors = anchors
+                    self.classes = classes
+
+                def __call__(self, inputs):
+                    return yolo_boxes(inputs, self.anchors, self.classes)
+
+            class YoloNMS(Layer):
+                def __init__(self, anchors, masks, classes, name=None):
+                    super(YoloNMS, self).__init__(name=name)
+                    self.anchors = anchors
+                    self.masks = masks
+                    self.classes = classes
+
+                def __call__(self, inputs):
+                    return yolo_nms(inputs, self.anchors, self.masks, self.classes)
+
+            def YoloV3(size=None, channels=3, anchors=yolo_anchors,
+                   masks=yolo_anchor_masks, classes=2, training=False):
+
+                x = inputs = Input([size, size, channels], name='input')
+
+                x_36, x_61, x = Darknet(name='yolo_darknet')(x)
+
+                x = YoloConv(512, name='yolo_conv_0')(x)
+                output_0 = YoloOutput(512, len(masks[0]), classes, name='yolo_output_0')(x)
+
+                x = YoloConv(256, name='yolo_conv_1')((x, x_61))
+                output_1 = YoloOutput(256, len(masks[1]), classes, name='yolo_output_1')(x)
+
+                x = YoloConv(128, name='yolo_conv_2')((x, x_36))
+                output_2 = YoloOutput(128, len(masks[2]), classes, name='yolo_output_2')(x)
+
+                if training:
+                    return Model(inputs, (output_0, output_1, output_2), name='yolov3')
+
+                anchors_0 = np.array([(116, 90), (156, 198), (373, 326)], np.float32) / 416
+                anchors_1 = np.array([(30, 61), (62, 45),(59, 119)], np.float32) / 416
+                anchors_2 = np.array([(10, 13), (16, 30), (33, 23)], np.float32) / 416
+
+                boxes_0 = YoloBoxLayer(anchors_0, name='yolo_boxes_0')(output_0)
+                boxes_1 = YoloBoxLayer(anchors_1, name='yolo_boxes_1')(output_1)
+                boxes_2 = YoloBoxLayer(anchors_2, name='yolo_boxes_2')(output_2)
+
+                outputs = YoloNMS(anchors, masks, classes, name='yolo_nms')((boxes_0[:3], boxes_1[:3], boxes_2[:3]))
+
+                return Model(inputs, outputs, name='yolov3')
+
+            def YoloLoss(anchors, classes=80, ignore_thresh=0.5):
+                def yolo_loss(y_true, y_pred):
+                    # 1. transform all pred outputs
+                    # y_pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...cls))
+                    pred_box, pred_obj, pred_class, pred_xywh = yolo_boxes(
+                        y_pred, anchors, classes)
+                    pred_xy = pred_xywh[..., 0:2]
+                    pred_wh = pred_xywh[..., 2:4]
+
+                    # 2. transform all true outputs
+                    # y_true: (batch_size, grid, grid, anchors, (x1, y1, x2, y2, obj, cls))
+                    true_box, true_obj, true_class_idx = tf.split(
+                        y_true, (4, 1, 1), axis=-1)
+                    true_xy = (true_box[..., 0:2] + true_box[..., 2:4]) / 2
+                    true_wh = true_box[..., 2:4] - true_box[..., 0:2]
+
+                    # give higher weights to small boxes
+                    box_loss_scale = 2 - true_wh[..., 0] * true_wh[..., 1]
+
+                    # 3. inverting the pred box equations
+                    grid_size = tf.shape(y_true)[1]
+                    grid = tf.meshgrid(tf.range(grid_size), tf.range(grid_size))
+                    grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
+                    true_xy = true_xy * tf.cast(grid_size, tf.float32) - \
+                        tf.cast(grid, tf.float32)
+                    true_wh = tf.math.log(true_wh / anchors)
+                    true_wh = tf.where(tf.math.is_inf(true_wh),
+                                    tf.zeros_like(true_wh), true_wh)
+
+                    # 4. calculate all masks
+                    obj_mask = tf.squeeze(true_obj, -1)
+                    # ignore false positive when iou is over threshold
+                    best_iou = tf.map_fn(
+                        lambda x: tf.reduce_max(broadcast_iou(x[0], tf.boolean_mask(
+                            x[1], tf.cast(x[2], tf.bool))), axis=-1),
+                        (pred_box, true_box, obj_mask),
+                        tf.float32)
+                    ignore_mask = tf.cast(best_iou < ignore_thresh, tf.float32)
+
+                    # 5. calculate all losses
+                    xy_loss = obj_mask * box_loss_scale * \
+                        tf.reduce_sum(tf.square(true_xy - pred_xy), axis=-1)
+                    wh_loss = obj_mask * box_loss_scale * \
+                        tf.reduce_sum(tf.square(true_wh - pred_wh), axis=-1)
+                    obj_loss = binary_crossentropy(true_obj, pred_obj)
+                    obj_loss = obj_mask * obj_loss + \
+                        (1 - obj_mask) * ignore_mask * obj_loss
+                    # TODO: use binary_crossentropy instead
+                    class_loss = obj_mask * sparse_categorical_crossentropy(
+                        true_class_idx, pred_class)
+
+                    # 6. sum over (batch, gridx, gridy, anchors) => (batch, 1)
+                    xy_loss = tf.reduce_sum(xy_loss, axis=(1, 2, 3))
+                    wh_loss = tf.reduce_sum(wh_loss, axis=(1, 2, 3))
+                    obj_loss = tf.reduce_sum(obj_loss, axis=(1, 2, 3))
+                    class_loss = tf.reduce_sum(class_loss, axis=(1, 2, 3))
+
+                    return xy_loss + wh_loss + obj_loss + class_loss
+                return yolo_loss
+
+            model_t = YoloV3(SIZE, channels=3, training=True, classes=NUM_CLASSES)
+            optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE)
+            loss = [YoloLoss(yolo_anchors[mask], classes=NUM_CLASSES) for mask in yolo_anchor_masks]
+            model_t.compile(optimizer=optimizer, loss=loss)
+            model_t.save(compiled_model)
+
+            model_p = YoloV3(SIZE, classes=NUM_CLASSES)
+            model_p.save(prediction_model)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Create model', description='')
+        _parser.add_argument("--compiled-model", dest="compiled_model", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--prediction-model", dest="prediction_model", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = create_model(**_parsed_args)
+      image: tensorflow/tensorflow:2.2.0
+    outputs:
+      artifacts:
+      - {name: create-model-compiled_model, path: /tmp/outputs/compiled_model/data}
+      - {name: create-model-prediction_model, path: /tmp/outputs/prediction_model/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--compiled-model", {"outputPath": "compiled_model"}, "--prediction-model",
+          {"outputPath": "prediction_model"}], "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''numpy'' || PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''numpy'' --user)
+          && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
+          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
+          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
+          file_path\n\ndef create_model(compiled_model, prediction_model):\n    import
+          json\n    import numpy as np\n    import tensorflow as tf\n    from tensorflow.keras
+          import Model\n    from tensorflow.keras.layers import (\n        Layer,\n        Add,\n        Concatenate,\n        Conv2D,\n        Input,\n        Lambda,\n        LeakyReLU,\n        MaxPool2D,\n        UpSampling2D,\n        ZeroPadding2D,\n        BatchNormalization,\n    )\n    from
+          tensorflow.keras.regularizers import l2\n    from tensorflow.keras.losses
+          import (\n        binary_crossentropy,\n        sparse_categorical_crossentropy\n    )\n\n    SIZE
+          = 256\n    NUM_CLASSES = 2\n    LEARNING_RATE = 1e-3\n\n    def broadcast_iou(box_1,
+          box_2):\n        # box_1: (..., (x1, y1, x2, y2))\n        # box_2: (N,
+          (x1, y1, x2, y2))\n\n        # broadcast boxes\n        box_1 = tf.expand_dims(box_1,
+          -2)\n        box_2 = tf.expand_dims(box_2, 0)\n        # new_shape: (...,
+          N, (x1, y1, x2, y2))\n        new_shape = tf.broadcast_dynamic_shape(tf.shape(box_1),
+          tf.shape(box_2))\n        box_1 = tf.broadcast_to(box_1, new_shape)\n        box_2
+          = tf.broadcast_to(box_2, new_shape)\n\n        int_w = tf.maximum(tf.minimum(box_1[...,
+          2], box_2[..., 2]) -\n                        tf.maximum(box_1[..., 0],
+          box_2[..., 0]), 0)\n        int_h = tf.maximum(tf.minimum(box_1[..., 3],
+          box_2[..., 3]) -\n                        tf.maximum(box_1[..., 1], box_2[...,
+          1]), 0)\n        int_area = int_w * int_h\n        box_1_area = (box_1[...,
+          2] - box_1[..., 0]) * \\\n            (box_1[..., 3] - box_1[..., 1])\n        box_2_area
+          = (box_2[..., 2] - box_2[..., 0]) * \\\n            (box_2[..., 3] - box_2[...,
+          1])\n        return int_area / (box_1_area + box_2_area - int_area)\n\n    yolo_anchors
+          = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),(59, 119),
+          (116, 90), (156, 198), (373, 326)], np.float32) / 416\n    yolo_anchor_masks
+          = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])\n\n    def DarknetConv(x,
+          filters, size, strides=1, batch_norm=True):\n        if strides == 1:\n            padding
+          = ''same''\n        else:\n            x = ZeroPadding2D(((1, 0), (1, 0)))(x)  #
+          top left half-padding\n            padding = ''valid''\n        x = Conv2D(filters=filters,
+          kernel_size=size,\n                strides=strides, padding=padding,\n                use_bias=not
+          batch_norm, kernel_regularizer=l2(0.0005))(x)\n        if batch_norm:\n            x
+          = BatchNormalization()(x)\n            x = LeakyReLU(alpha=0.1)(x)\n        return
+          x\n\n    def DarknetResidual(x, filters):\n        prev = x\n        x =
+          DarknetConv(x, filters // 2, 1)\n        x = DarknetConv(x, filters, 3)\n        x
+          = Add()([prev, x])\n        return x\n\n    def DarknetBlock(x, filters,
+          blocks):\n        x = DarknetConv(x, filters, 3, strides=2)\n        for
+          _ in range(blocks):\n            x = DarknetResidual(x, filters)\n        return
+          x\n\n    def Darknet(name=None):\n        x = inputs = Input([None, None,
+          3])\n        x = DarknetConv(x, 32, 3)\n        x = DarknetBlock(x, 64,
+          1)\n        x = DarknetBlock(x, 128, 2)  # skip connection\n        x =
+          x_36 = DarknetBlock(x, 256, 8)  # skip connection\n        x = x_61 = DarknetBlock(x,
+          512, 8)\n        x = DarknetBlock(x, 1024, 4)\n        return Model(inputs,
+          (x_36, x_61, x), name=name)\n\n    def YoloConv(filters, name=None):\n        def
+          yolo_conv(x_in):\n            if isinstance(x_in, tuple):\n                inputs
+          = Input(x_in[0].shape[1:]), Input(x_in[1].shape[1:])\n                x,
+          x_skip = inputs\n\n                # concat with skip connection\n                x
+          = DarknetConv(x, filters, 1)\n                x = UpSampling2D(2)(x)\n                x
+          = Concatenate()([x, x_skip])\n            else:\n                x = inputs
+          = Input(x_in.shape[1:])\n\n            x = DarknetConv(x, filters, 1)\n            x
+          = DarknetConv(x, filters * 2, 3)\n            x = DarknetConv(x, filters,
+          1)\n            x = DarknetConv(x, filters * 2, 3)\n            x = DarknetConv(x,
+          filters, 1)\n            return Model(inputs, x, name=name)(x_in)\n        return
+          yolo_conv\n\n    class ReshapeLayer(Layer):\n        def __init__(self,
+          anchors, classes):\n            super(ReshapeLayer, self).__init__()\n            self.anchors
+          = anchors\n            self.classes = classes\n\n        def call(self,
+          inputs):\n            return tf.reshape(inputs, (-1, tf.shape(inputs)[1],
+          tf.shape(inputs)[2], self.anchors, self.classes + 5))\n\n    def YoloOutput(filters,
+          anchors, classes, name=None):\n        def yolo_output(x_in):\n            x
+          = inputs = Input(x_in.shape[1:])\n            x = DarknetConv(x, filters
+          * 2, 3)\n            x = DarknetConv(x, anchors * (classes + 5), 1, batch_norm=False)\n            #
+          x = Lambda(lambda x: tf.reshape(x, (-1, tf.shape(x)[1], tf.shape(x)[2],
+          anchors, classes + 5)))(x)\n            x = ReshapeLayer(anchors, classes)(x)\n            return
+          Model(inputs, x, name=name)(x_in)\n        return yolo_output\n\n    def
+          _meshgrid(n_a, n_b):\n        return [\n            tf.reshape(tf.tile(tf.range(n_a),
+          [n_b]), (n_b, n_a)),\n            tf.reshape(tf.repeat(tf.range(n_b), n_a),
+          (n_b, n_a))\n        ]\n\n    def yolo_boxes(pred, anchors, classes):\n        #
+          pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))\n        grid_size
+          = tf.shape(pred)[1:3]\n        box_xy, box_wh, objectness, class_probs =
+          tf.split(\n            pred, (2, 2, 1, classes), axis=-1)\n\n        box_xy
+          = tf.sigmoid(box_xy)\n        objectness = tf.sigmoid(objectness)\n        class_probs
+          = tf.sigmoid(class_probs)\n        pred_box = tf.concat((box_xy, box_wh),
+          axis=-1)  # original xywh for loss\n\n        # !!! grid[x][y] == (y, x)\n        grid
+          = _meshgrid(grid_size[1],grid_size[0])\n        grid = tf.expand_dims(tf.stack(grid,
+          axis=-1), axis=2)  # [gx, gy, 1, 2]\n\n        box_xy = (box_xy + tf.cast(grid,
+          tf.float32)) / \\\n            tf.cast(grid_size, tf.float32)\n        box_wh
+          = tf.exp(box_wh) * anchors\n\n        box_x1y1 = box_xy - box_wh / 2\n        box_x2y2
+          = box_xy + box_wh / 2\n        bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)\n\n        return
+          bbox, objectness, class_probs, pred_box\n\n    def yolo_nms(outputs, anchors,
+          masks, classes):\n        # boxes, conf, type\n        b, c, t = [], [],
+          []\n\n        for o in outputs:\n            b.append(tf.reshape(o[0], (tf.shape(o[0])[0],
+          -1, tf.shape(o[0])[-1])))\n            c.append(tf.reshape(o[1], (tf.shape(o[1])[0],
+          -1, tf.shape(o[1])[-1])))\n            t.append(tf.reshape(o[2], (tf.shape(o[2])[0],
+          -1, tf.shape(o[2])[-1])))\n\n        bbox = tf.concat(b, axis=1)\n        confidence
+          = tf.concat(c, axis=1)\n        class_probs = tf.concat(t, axis=1)\n\n        #
+          If we only have one class, do not multiply by class_prob (always 0.5)\n        if
+          classes == 1:\n            scores = confidence\n        else:\n            scores
+          = confidence * class_probs\n\n        dscores = tf.squeeze(scores, axis=0)\n        scores
+          = tf.reduce_max(dscores,[1])\n        bbox = tf.reshape(bbox,(-1,4))\n        classes
+          = tf.argmax(dscores,1)\n        selected_indices, selected_scores = tf.image.non_max_suppression_with_scores(\n            boxes=bbox,\n            scores=scores,\n            max_output_size=100,\n            iou_threshold=0.5,\n            score_threshold=0.5,\n            soft_nms_sigma=0.5\n        )\n\n        num_valid_nms_boxes
+          = tf.shape(selected_indices)[0]\n\n        selected_indices = tf.concat([selected_indices,tf.zeros(100-num_valid_nms_boxes,
+          tf.int32)], 0)\n        selected_scores = tf.concat([selected_scores,tf.zeros(100-num_valid_nms_boxes,tf.float32)],
+          -1)\n\n        boxes=tf.gather(bbox, selected_indices)\n        boxes =
+          tf.expand_dims(boxes, axis=0)\n        scores=selected_scores\n        scores
+          = tf.expand_dims(scores, axis=0)\n        classes = tf.gather(classes,selected_indices)\n        classes
+          = tf.expand_dims(classes, axis=0)\n        valid_detections=num_valid_nms_boxes\n        valid_detections
+          = tf.expand_dims(valid_detections, axis=0)\n\n        return boxes, scores,
+          classes, valid_detections\n\n    class YoloBoxLayer(Layer):\n        def
+          __init__(self, anchors, classes=2, name=None):\n            super(YoloBoxLayer,
+          self).__init__(name=name)\n            self.anchors = anchors\n            self.classes
+          = classes\n\n        def __call__(self, inputs):\n            return yolo_boxes(inputs,
+          self.anchors, self.classes)\n\n    class YoloNMS(Layer):\n        def __init__(self,
+          anchors, masks, classes, name=None):\n            super(YoloNMS, self).__init__(name=name)\n            self.anchors
+          = anchors\n            self.masks = masks\n            self.classes = classes\n\n        def
+          __call__(self, inputs):\n            return yolo_nms(inputs, self.anchors,
+          self.masks, self.classes)\n\n    def YoloV3(size=None, channels=3, anchors=yolo_anchors,\n           masks=yolo_anchor_masks,
+          classes=2, training=False):\n\n        x = inputs = Input([size, size, channels],
+          name=''input'')\n\n        x_36, x_61, x = Darknet(name=''yolo_darknet'')(x)\n\n        x
+          = YoloConv(512, name=''yolo_conv_0'')(x)\n        output_0 = YoloOutput(512,
+          len(masks[0]), classes, name=''yolo_output_0'')(x)\n\n        x = YoloConv(256,
+          name=''yolo_conv_1'')((x, x_61))\n        output_1 = YoloOutput(256, len(masks[1]),
+          classes, name=''yolo_output_1'')(x)\n\n        x = YoloConv(128, name=''yolo_conv_2'')((x,
+          x_36))\n        output_2 = YoloOutput(128, len(masks[2]), classes, name=''yolo_output_2'')(x)\n\n        if
+          training:\n            return Model(inputs, (output_0, output_1, output_2),
+          name=''yolov3'')\n\n        anchors_0 = np.array([(116, 90), (156, 198),
+          (373, 326)], np.float32) / 416\n        anchors_1 = np.array([(30, 61),
+          (62, 45),(59, 119)], np.float32) / 416\n        anchors_2 = np.array([(10,
+          13), (16, 30), (33, 23)], np.float32) / 416\n\n        boxes_0 = YoloBoxLayer(anchors_0,
+          name=''yolo_boxes_0'')(output_0)\n        boxes_1 = YoloBoxLayer(anchors_1,
+          name=''yolo_boxes_1'')(output_1)\n        boxes_2 = YoloBoxLayer(anchors_2,
+          name=''yolo_boxes_2'')(output_2)\n\n        outputs = YoloNMS(anchors, masks,
+          classes, name=''yolo_nms'')((boxes_0[:3], boxes_1[:3], boxes_2[:3]))\n\n        return
+          Model(inputs, outputs, name=''yolov3'')\n\n    def YoloLoss(anchors, classes=80,
+          ignore_thresh=0.5):\n        def yolo_loss(y_true, y_pred):\n            #
+          1. transform all pred outputs\n            # y_pred: (batch_size, grid,
+          grid, anchors, (x, y, w, h, obj, ...cls))\n            pred_box, pred_obj,
+          pred_class, pred_xywh = yolo_boxes(\n                y_pred, anchors, classes)\n            pred_xy
+          = pred_xywh[..., 0:2]\n            pred_wh = pred_xywh[..., 2:4]\n\n            #
+          2. transform all true outputs\n            # y_true: (batch_size, grid,
+          grid, anchors, (x1, y1, x2, y2, obj, cls))\n            true_box, true_obj,
+          true_class_idx = tf.split(\n                y_true, (4, 1, 1), axis=-1)\n            true_xy
+          = (true_box[..., 0:2] + true_box[..., 2:4]) / 2\n            true_wh = true_box[...,
+          2:4] - true_box[..., 0:2]\n\n            # give higher weights to small
+          boxes\n            box_loss_scale = 2 - true_wh[..., 0] * true_wh[..., 1]\n\n            #
+          3. inverting the pred box equations\n            grid_size = tf.shape(y_true)[1]\n            grid
+          = tf.meshgrid(tf.range(grid_size), tf.range(grid_size))\n            grid
+          = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)\n            true_xy =
+          true_xy * tf.cast(grid_size, tf.float32) - \\\n                tf.cast(grid,
+          tf.float32)\n            true_wh = tf.math.log(true_wh / anchors)\n            true_wh
+          = tf.where(tf.math.is_inf(true_wh),\n                            tf.zeros_like(true_wh),
+          true_wh)\n\n            # 4. calculate all masks\n            obj_mask =
+          tf.squeeze(true_obj, -1)\n            # ignore false positive when iou is
+          over threshold\n            best_iou = tf.map_fn(\n                lambda
+          x: tf.reduce_max(broadcast_iou(x[0], tf.boolean_mask(\n                    x[1],
+          tf.cast(x[2], tf.bool))), axis=-1),\n                (pred_box, true_box,
+          obj_mask),\n                tf.float32)\n            ignore_mask = tf.cast(best_iou
+          < ignore_thresh, tf.float32)\n\n            # 5. calculate all losses\n            xy_loss
+          = obj_mask * box_loss_scale * \\\n                tf.reduce_sum(tf.square(true_xy
+          - pred_xy), axis=-1)\n            wh_loss = obj_mask * box_loss_scale *
+          \\\n                tf.reduce_sum(tf.square(true_wh - pred_wh), axis=-1)\n            obj_loss
+          = binary_crossentropy(true_obj, pred_obj)\n            obj_loss = obj_mask
+          * obj_loss + \\\n                (1 - obj_mask) * ignore_mask * obj_loss\n            #
+          TODO: use binary_crossentropy instead\n            class_loss = obj_mask
+          * sparse_categorical_crossentropy(\n                true_class_idx, pred_class)\n\n            #
+          6. sum over (batch, gridx, gridy, anchors) => (batch, 1)\n            xy_loss
+          = tf.reduce_sum(xy_loss, axis=(1, 2, 3))\n            wh_loss = tf.reduce_sum(wh_loss,
+          axis=(1, 2, 3))\n            obj_loss = tf.reduce_sum(obj_loss, axis=(1,
+          2, 3))\n            class_loss = tf.reduce_sum(class_loss, axis=(1, 2, 3))\n\n            return
+          xy_loss + wh_loss + obj_loss + class_loss\n        return yolo_loss\n\n    model_t
+          = YoloV3(SIZE, channels=3, training=True, classes=NUM_CLASSES)\n    optimizer
+          = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE)\n    loss = [YoloLoss(yolo_anchors[mask],
+          classes=NUM_CLASSES) for mask in yolo_anchor_masks]\n    model_t.compile(optimizer=optimizer,
+          loss=loss)\n    model_t.save(compiled_model)\n\n    model_p = YoloV3(SIZE,
+          classes=NUM_CLASSES)\n    model_p.save(prediction_model)\n\nimport argparse\n_parser
+          = argparse.ArgumentParser(prog=''Create model'', description='''')\n_parser.add_argument(\"--compiled-model\",
+          dest=\"compiled_model\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parser.add_argument(\"--prediction-model\",
+          dest=\"prediction_model\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = create_model(**_parsed_args)\n"], "image": "tensorflow/tensorflow:2.2.0"}},
+          "name": "Create model", "outputs": [{"name": "compiled_model", "type": "TFModel"},
+          {"name": "prediction_model", "type": "TFModel"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "8c6a64c86b31d1457d0d422af72c5a3f1ee61b30a51a5c6842f01be0a05e06f6", "url":
+          "./component-files/create_model_component.yaml"}'}
+  - name: load-test-img
+    container:
+      args: [--input-img, /tmp/outputs/input_img/data]
+      command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+        'gdown' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+        --no-warn-script-location 'gdown' --user) && "$0" "$@"
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def load_test_img(input_img):
+            import gdown
+            img_url = 'https://drive.google.com/file/d/13PzBr8jBjHdt4VMaEcEOkMoCF6VKpmx1/view?usp=share_link'
+            gdown.download(img_url, output=input_img, quiet=True, fuzzy=True)
+            print(f'download complete!')
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Load test img', description='')
+        _parser.add_argument("--input-img", dest="input_img", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = load_test_img(**_parsed_args)
+      image: python:3.7
+    outputs:
+      artifacts:
+      - {name: load-test-img-input_img, path: /tmp/outputs/input_img/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--input-img", {"outputPath": "input_img"}], "command": ["sh",
+          "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+          ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+          --no-warn-script-location ''gdown'' --user) && \"$0\" \"$@\"", "sh", "-ec",
+          "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
+          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
+          file_path\n\ndef load_test_img(input_img):\n    import gdown\n    img_url
+          = ''https://drive.google.com/file/d/13PzBr8jBjHdt4VMaEcEOkMoCF6VKpmx1/view?usp=share_link''\n    gdown.download(img_url,
+          output=input_img, quiet=True, fuzzy=True)\n    print(f''download complete!'')\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Load test img'', description='''')\n_parser.add_argument(\"--input-img\",
+          dest=\"input_img\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = load_test_img(**_parsed_args)\n"], "image": "python:3.7"}}, "name": "Load
+          test img", "outputs": [{"name": "input_img", "type": "jpg"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "24e60e28c06f4f5cde754768fc87452ec2e69f417c298a868882c993e59a97e2", "url":
+          "./component-files/load_test_img_component.yaml"}'}
+  - name: load-train-data
+    container:
+      args: [--train-dataset, /tmp/outputs/train_dataset/data, --val-dataset, /tmp/outputs/val_dataset/data]
+      command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+        'gdown' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+        --no-warn-script-location 'gdown' --user) && "$0" "$@"
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def load_train_data(train_dataset, val_dataset):
+            import gdown
+            dataset_url = 'https://drive.google.com/file/d/1Sq0bph5QJE5U_x-qu8hUcjgiTONeBDy1/view?usp=sharing'
+            gdown.download(dataset_url, output=train_dataset, quiet=True, fuzzy=True)
+            dataset_url = 'https://drive.google.com/file/d/172vMkaGKkol2x1juNzjWdEwNZrTyZnvz/view?usp=share_link'
+            gdown.download(dataset_url, output=val_dataset, quiet=True, fuzzy=True)
+            print(f'download complete!')
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Load train data', description='')
+        _parser.add_argument("--train-dataset", dest="train_dataset", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--val-dataset", dest="val_dataset", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = load_train_data(**_parsed_args)
+      image: python:3.7
+    outputs:
+      artifacts:
+      - {name: load-train-data-train_dataset, path: /tmp/outputs/train_dataset/data}
+      - {name: load-train-data-val_dataset, path: /tmp/outputs/val_dataset/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--train-dataset", {"outputPath": "train_dataset"}, "--val-dataset",
+          {"outputPath": "val_dataset"}], "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''gdown'' --user)
+          && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
+          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
+          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
+          file_path\n\ndef load_train_data(train_dataset, val_dataset):\n    import
+          gdown\n    dataset_url = ''https://drive.google.com/file/d/1Sq0bph5QJE5U_x-qu8hUcjgiTONeBDy1/view?usp=sharing''\n    gdown.download(dataset_url,
+          output=train_dataset, quiet=True, fuzzy=True)\n    dataset_url = ''https://drive.google.com/file/d/172vMkaGKkol2x1juNzjWdEwNZrTyZnvz/view?usp=share_link''\n    gdown.download(dataset_url,
+          output=val_dataset, quiet=True, fuzzy=True)\n    print(f''download complete!'')\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Load train data'', description='''')\n_parser.add_argument(\"--train-dataset\",
+          dest=\"train_dataset\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset\", dest=\"val_dataset\",
+          type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = load_train_data(**_parsed_args)\n"],
+          "image": "python:3.7"}}, "name": "Load train data", "outputs": [{"name":
+          "train_dataset", "type": "Dataset"}, {"name": "val_dataset", "type": "Dataset"}]}',
+        pipelines.kubeflow.org/component_ref: '{"digest": "9a50133b9f92fbb5f1346df3aec5b04ea122006e8ac5818701a738ae03b3749d",
+          "url": "./component-files/load_train_data_component.yaml"}'}
+  - name: load-weights
+    container:
+      args: [--pretrained-weights, /tmp/outputs/pretrained_weights/data]
+      command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+        'gdown' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+        --no-warn-script-location 'gdown' --user) && "$0" "$@"
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def load_weights(pretrained_weights):
+            import gdown
+            checkpoint_url = 'https://drive.google.com/drive/folders/1-C3N6h-CtdojHjEyFvXGXBorDFBo_k4z?usp=share_link'
+            gdown.download_folder(checkpoint_url, output=pretrained_weights, quiet=True, use_cookies=False)
+            print(f'download complete!')
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Load weights', description='')
+        _parser.add_argument("--pretrained-weights", dest="pretrained_weights", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = load_weights(**_parsed_args)
+      image: python:3.7
+    outputs:
+      artifacts:
+      - {name: load-weights-pretrained_weights, path: /tmp/outputs/pretrained_weights/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--pretrained-weights", {"outputPath": "pretrained_weights"}],
+          "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip
+          install --quiet --no-warn-script-location ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''gdown'' --user)
+          && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
+          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
+          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
+          file_path\n\ndef load_weights(pretrained_weights):\n    import gdown\n    checkpoint_url
+          = ''https://drive.google.com/drive/folders/1-C3N6h-CtdojHjEyFvXGXBorDFBo_k4z?usp=share_link''\n    gdown.download_folder(checkpoint_url,
+          output=pretrained_weights, quiet=True, use_cookies=False)\n    print(f''download
+          complete!'')\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Load
+          weights'', description='''')\n_parser.add_argument(\"--pretrained-weights\",
+          dest=\"pretrained_weights\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = load_weights(**_parsed_args)\n"], "image": "python:3.7"}}, "name": "Load
+          weights", "outputs": [{"name": "pretrained_weights", "type": "Weights"}]}',
+        pipelines.kubeflow.org/component_ref: '{"digest": "3f097fe329589c6fd519e961cd6a523d3eca00f00f56eb79f654d756ccd7beb3",
+          "url": "./component-files/load_weights_component.yaml"}'}
+  - name: test
+    container:
+      args: [--prediction-model, /tmp/inputs/prediction_model/data, --trained-weights,
+        /tmp/inputs/trained_weights/data, --input-img, /tmp/inputs/input_img/data,
+        --output-img, /tmp/outputs/output_img/data]
+      command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+        'Pillow' 'numpy' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install
+        --quiet --no-warn-script-location 'Pillow' 'numpy' --user) && "$0" "$@"
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def test(
+            prediction_model,
+            trained_weights,
+            input_img,
+            output_img
+        ):
+            import tensorflow as tf
+            # import cv2
+            import numpy as np
+
+            def transform_images(x_train, size):
+                x_train = tf.image.resize(x_train, (size, size))
+                x_train = x_train / 255
+                return x_train
+
+            # def draw_outputs(img, outputs, class_names):
+            #     boxes, objectness, classes, nums = outputs
+            #     boxes, objectness, classes, nums = boxes[0], objectness[0], classes[0], nums[0]
+            #     wh = np.flip(img.shape[0:2])
+            #     for i in range(nums):
+            #         x1y1 = tuple((np.array(boxes[i][0:2]) * wh).astype(np.int32))
+            #         x2y2 = tuple((np.array(boxes[i][2:4]) * wh).astype(np.int32))
+            #         img = cv2.rectangle(img, x1y1, x2y2, (255, 0, 0), 2)
+            #         img = cv2.putText(img, '{} {:.4f}'.format(
+            #             class_names[int(classes[i])], objectness[i]),
+            #             x1y1, cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, (0, 0, 255), 2)
+            #     return img
+
+            model = tf.keras.models.load_model(prediction_model)
+            print('model loaded')
+
+            model.load_weights(trained_weights+'/trained_weights.tf')
+            print('trained weights loaded')
+
+            class_names = ['negative', 'positive']
+
+            img_raw = tf.image.decode_image(open(input_img, 'rb').read(), channels=3)
+            img = tf.expand_dims(img_raw, 0)
+            img = transform_images(img, 256)
+
+            boxes, scores, classes, nums = model(img)
+            print('inference done')
+
+            def switch(tensor):
+                for img_index in range(tensor.shape[0]):
+                    for box_index in range(tensor.shape[1]):
+                        xmin, ymin, xmax, ymax = tensor[img_index][box_index]
+                        tensor[img_index][box_index] = ymin, xmin, ymax, xmax
+                return tensor
+
+            colors = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+            boxes = switch(boxes.numpy())
+            print(boxes[:,:nums[0].numpy(),:].shape, img.shape)
+            img = tf.image.draw_bounding_boxes(img, boxes[:,:nums[0].numpy(),:], colors)
+            from PIL import Image
+            img = Image.fromarray((img.numpy()*255).astype(np.uint8)[0])
+            import os
+            os.mkdir(output_img)
+            img.save(output_img+'/output.jpg')
+            print('image written')
+
+            # img = cv2.cvtColor(img_raw.numpy(), cv2.COLOR_RGB2BGR)
+            # img = draw_outputs(img, (boxes, scores, classes, nums), class_names)
+            # cv2.imwrite(output_img, img)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Test', description='')
+        _parser.add_argument("--prediction-model", dest="prediction_model", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--trained-weights", dest="trained_weights", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--input-img", dest="input_img", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--output-img", dest="output_img", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = test(**_parsed_args)
+      image: tensorflow/tensorflow:2.2.0
+    inputs:
+      artifacts:
+      - {name: load-test-img-input_img, path: /tmp/inputs/input_img/data}
+      - {name: create-model-prediction_model, path: /tmp/inputs/prediction_model/data}
+      - {name: train-model-trained_weights, path: /tmp/inputs/trained_weights/data}
+    outputs:
+      artifacts:
+      - {name: test-output_img, path: /tmp/outputs/output_img/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--prediction-model", {"inputPath": "prediction_model"}, "--trained-weights",
+          {"inputPath": "trained_weights"}, "--input-img", {"inputPath": "input_img"},
+          "--output-img", {"outputPath": "output_img"}], "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''Pillow'' ''numpy''
+          || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+          ''Pillow'' ''numpy'' --user) && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf
+          \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+          "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n    os.makedirs(os.path.dirname(file_path),
+          exist_ok=True)\n    return file_path\n\ndef test(\n    prediction_model,\n    trained_weights,\n    input_img,\n    output_img\n):\n    import
+          tensorflow as tf\n    # import cv2\n    import numpy as np\n\n    def transform_images(x_train,
+          size):\n        x_train = tf.image.resize(x_train, (size, size))\n        x_train
+          = x_train / 255\n        return x_train\n\n    # def draw_outputs(img, outputs,
+          class_names):\n    #     boxes, objectness, classes, nums = outputs\n    #     boxes,
+          objectness, classes, nums = boxes[0], objectness[0], classes[0], nums[0]\n    #     wh
+          = np.flip(img.shape[0:2])\n    #     for i in range(nums):\n    #         x1y1
+          = tuple((np.array(boxes[i][0:2]) * wh).astype(np.int32))\n    #         x2y2
+          = tuple((np.array(boxes[i][2:4]) * wh).astype(np.int32))\n    #         img
+          = cv2.rectangle(img, x1y1, x2y2, (255, 0, 0), 2)\n    #         img = cv2.putText(img,
+          ''{} {:.4f}''.format(\n    #             class_names[int(classes[i])], objectness[i]),\n    #             x1y1,
+          cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, (0, 0, 255), 2)\n    #     return img\n\n    model
+          = tf.keras.models.load_model(prediction_model)\n    print(''model loaded'')\n\n    model.load_weights(trained_weights+''/trained_weights.tf'')\n    print(''trained
+          weights loaded'')\n\n    class_names = [''negative'', ''positive'']\n\n    img_raw
+          = tf.image.decode_image(open(input_img, ''rb'').read(), channels=3)\n    img
+          = tf.expand_dims(img_raw, 0)\n    img = transform_images(img, 256)\n\n    boxes,
+          scores, classes, nums = model(img)\n    print(''inference done'')\n\n    def
+          switch(tensor):\n        for img_index in range(tensor.shape[0]):\n            for
+          box_index in range(tensor.shape[1]):\n                xmin, ymin, xmax,
+          ymax = tensor[img_index][box_index]\n                tensor[img_index][box_index]
+          = ymin, xmin, ymax, xmax\n        return tensor\n\n    colors = np.array([[1.0,
+          0.0, 0.0], [0.0, 0.0, 1.0]])\n    boxes = switch(boxes.numpy())\n    print(boxes[:,:nums[0].numpy(),:].shape,
+          img.shape)\n    img = tf.image.draw_bounding_boxes(img, boxes[:,:nums[0].numpy(),:],
+          colors)\n    from PIL import Image\n    img = Image.fromarray((img.numpy()*255).astype(np.uint8)[0])\n    import
+          os\n    os.mkdir(output_img)\n    img.save(output_img+''/output.jpg'')\n    print(''image
+          written'')\n\n    # img = cv2.cvtColor(img_raw.numpy(), cv2.COLOR_RGB2BGR)\n    #
+          img = draw_outputs(img, (boxes, scores, classes, nums), class_names)\n    #
+          cv2.imwrite(output_img, img)\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Test'',
+          description='''')\n_parser.add_argument(\"--prediction-model\", dest=\"prediction_model\",
+          type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--trained-weights\",
+          dest=\"trained_weights\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--input-img\",
+          dest=\"input_img\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--output-img\",
+          dest=\"output_img\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = test(**_parsed_args)\n"], "image": "tensorflow/tensorflow:2.2.0"}}, "inputs":
+          [{"name": "prediction_model", "type": "TFModel"}, {"name": "trained_weights",
+          "type": "Weights"}, {"name": "input_img", "type": "jpg"}], "name": "Test",
+          "outputs": [{"name": "output_img", "type": "jpg"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "4f95d353019d0ed6648fc8c3d5f3a56331db744874c8e15591e0de44dd22e74e", "url":
+          "./component-files/test_component.yaml"}'}
+  - name: test-yolov3-pipeline
+    dag:
+      tasks:
+      - {name: create-model, template: create-model}
+      - {name: load-test-img, template: load-test-img}
+      - {name: load-train-data, template: load-train-data}
+      - {name: load-weights, template: load-weights}
+      - name: test
+        template: test
+        dependencies: [create-model, load-test-img, train-model]
+        arguments:
+          artifacts:
+          - {name: create-model-prediction_model, from: '{{tasks.create-model.outputs.artifacts.create-model-prediction_model}}'}
+          - {name: load-test-img-input_img, from: '{{tasks.load-test-img.outputs.artifacts.load-test-img-input_img}}'}
+          - {name: train-model-trained_weights, from: '{{tasks.train-model.outputs.artifacts.train-model-trained_weights}}'}
+      - name: train-model
+        template: train-model
+        dependencies: [load-train-data, update-model-weights]
+        arguments:
+          artifacts:
+          - {name: load-train-data-train_dataset, from: '{{tasks.load-train-data.outputs.artifacts.load-train-data-train_dataset}}'}
+          - {name: load-train-data-val_dataset, from: '{{tasks.load-train-data.outputs.artifacts.load-train-data-val_dataset}}'}
+          - {name: update-model-weights-loaded_model, from: '{{tasks.update-model-weights.outputs.artifacts.update-model-weights-loaded_model}}'}
+      - name: update-model-weights
+        template: update-model-weights
+        dependencies: [create-model, load-weights]
+        arguments:
+          artifacts:
+          - {name: create-model-compiled_model, from: '{{tasks.create-model.outputs.artifacts.create-model-compiled_model}}'}
+          - {name: load-weights-pretrained_weights, from: '{{tasks.load-weights.outputs.artifacts.load-weights-pretrained_weights}}'}
+  - name: train-model
+    container:
+      args: [--train-dataset, /tmp/inputs/train_dataset/data, --val-dataset, /tmp/inputs/val_dataset/data,
+        --loaded-model, /tmp/inputs/loaded_model/data, --trained-weights, /tmp/outputs/trained_weights/data]
+      command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+        'numpy' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+        --no-warn-script-location 'numpy' --user) && "$0" "$@"
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n \
+        \   os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return file_path\n\
+        \ndef train_model(\n    train_dataset,\n    val_dataset,\n    loaded_model,\n\
+        \    trained_weights\n):\n    import numpy as np\n    import tensorflow as\
+        \ tf\n    from tensorflow.keras.callbacks import (\n        ReduceLROnPlateau,\n\
+        \        EarlyStopping,\n        ModelCheckpoint\n    )\n    from tensorflow.keras.losses\
+        \ import (\n        binary_crossentropy,\n        sparse_categorical_crossentropy\n\
+        \    )\n\n    def _meshgrid(n_a, n_b):\n        return [\n            tf.reshape(tf.tile(tf.range(n_a),\
+        \ [n_b]), (n_b, n_a)),\n            tf.reshape(tf.repeat(tf.range(n_b), n_a),\
+        \ (n_b, n_a))\n        ]\n\n    def broadcast_iou(box_1, box_2):\n       \
+        \ # box_1: (..., (x1, y1, x2, y2))\n        # box_2: (N, (x1, y1, x2, y2))\n\
+        \n        # broadcast boxes\n        box_1 = tf.expand_dims(box_1, -2)\n \
+        \       box_2 = tf.expand_dims(box_2, 0)\n        # new_shape: (..., N, (x1,\
+        \ y1, x2, y2))\n        new_shape = tf.broadcast_dynamic_shape(tf.shape(box_1),\
+        \ tf.shape(box_2))\n        box_1 = tf.broadcast_to(box_1, new_shape)\n  \
+        \      box_2 = tf.broadcast_to(box_2, new_shape)\n\n        int_w = tf.maximum(tf.minimum(box_1[...,\
+        \ 2], box_2[..., 2]) -\n                        tf.maximum(box_1[..., 0],\
+        \ box_2[..., 0]), 0)\n        int_h = tf.maximum(tf.minimum(box_1[..., 3],\
+        \ box_2[..., 3]) -\n                        tf.maximum(box_1[..., 1], box_2[...,\
+        \ 1]), 0)\n        int_area = int_w * int_h\n        box_1_area = (box_1[...,\
+        \ 2] - box_1[..., 0]) * \\\n            (box_1[..., 3] - box_1[..., 1])\n\
+        \        box_2_area = (box_2[..., 2] - box_2[..., 0]) * \\\n            (box_2[...,\
+        \ 3] - box_2[..., 1])\n        return int_area / (box_1_area + box_2_area\
+        \ - int_area)\n\n    def yolo_boxes(pred, anchors, classes):\n        # pred:\
+        \ (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))\n     \
+        \   grid_size = tf.shape(pred)[1:3]\n        box_xy, box_wh, objectness, class_probs\
+        \ = tf.split(\n            pred, (2, 2, 1, classes), axis=-1)\n\n        box_xy\
+        \ = tf.sigmoid(box_xy)\n        objectness = tf.sigmoid(objectness)\n    \
+        \    class_probs = tf.sigmoid(class_probs)\n        pred_box = tf.concat((box_xy,\
+        \ box_wh), axis=-1)  # original xywh for loss\n\n        # !!! grid[x][y]\
+        \ == (y, x)\n        grid = _meshgrid(grid_size[1],grid_size[0])\n       \
+        \ grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)  # [gx, gy, 1, 2]\n\
+        \n        box_xy = (box_xy + tf.cast(grid, tf.float32)) / \\\n           \
+        \ tf.cast(grid_size, tf.float32)\n        box_wh = tf.exp(box_wh) * anchors\n\
+        \n        box_x1y1 = box_xy - box_wh / 2\n        box_x2y2 = box_xy + box_wh\
+        \ / 2\n        bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)\n\n       \
+        \ return bbox, objectness, class_probs, pred_box\n\n    def YoloLoss(anchors,\
+        \ classes=2, ignore_thresh=0.5):\n        def yolo_loss(y_true, y_pred):\n\
+        \            # 1. transform all pred outputs\n            # y_pred: (batch_size,\
+        \ grid, grid, anchors, (x, y, w, h, obj, ...cls))\n            pred_box, pred_obj,\
+        \ pred_class, pred_xywh = yolo_boxes(\n                y_pred, anchors, classes)\n\
+        \            pred_xy = pred_xywh[..., 0:2]\n            pred_wh = pred_xywh[...,\
+        \ 2:4]\n\n            # 2. transform all true outputs\n            # y_true:\
+        \ (batch_size, grid, grid, anchors, (x1, y1, x2, y2, obj, cls))\n        \
+        \    true_box, true_obj, true_class_idx = tf.split(\n                y_true,\
+        \ (4, 1, 1), axis=-1)\n            true_xy = (true_box[..., 0:2] + true_box[...,\
+        \ 2:4]) / 2\n            true_wh = true_box[..., 2:4] - true_box[..., 0:2]\n\
+        \n            # give higher weights to small boxes\n            box_loss_scale\
+        \ = 2 - true_wh[..., 0] * true_wh[..., 1]\n\n            # 3. inverting the\
+        \ pred box equations\n            grid_size = tf.shape(y_true)[1]\n      \
+        \      grid = tf.meshgrid(tf.range(grid_size), tf.range(grid_size))\n    \
+        \        grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)\n        \
+        \    true_xy = true_xy * tf.cast(grid_size, tf.float32) - \\\n           \
+        \     tf.cast(grid, tf.float32)\n            true_wh = tf.math.log(true_wh\
+        \ / anchors)\n            true_wh = tf.where(tf.math.is_inf(true_wh),\n  \
+        \                          tf.zeros_like(true_wh), true_wh)\n\n          \
+        \  # 4. calculate all masks\n            obj_mask = tf.squeeze(true_obj, -1)\n\
+        \            # ignore false positive when iou is over threshold\n        \
+        \    best_iou = tf.map_fn(\n                lambda x: tf.reduce_max(broadcast_iou(x[0],\
+        \ tf.boolean_mask(\n                    x[1], tf.cast(x[2], tf.bool))), axis=-1),\n\
+        \                (pred_box, true_box, obj_mask),\n                tf.float32)\n\
+        \            ignore_mask = tf.cast(best_iou < ignore_thresh, tf.float32)\n\
+        \n            # 5. calculate all losses\n            xy_loss = obj_mask *\
+        \ box_loss_scale * \\\n                tf.reduce_sum(tf.square(true_xy - pred_xy),\
+        \ axis=-1)\n            wh_loss = obj_mask * box_loss_scale * \\\n       \
+        \         tf.reduce_sum(tf.square(true_wh - pred_wh), axis=-1)\n         \
+        \   obj_loss = binary_crossentropy(true_obj, pred_obj)\n            obj_loss\
+        \ = obj_mask * obj_loss + \\\n                (1 - obj_mask) * ignore_mask\
+        \ * obj_loss\n            # TODO: use binary_crossentropy instead\n      \
+        \      class_loss = obj_mask * sparse_categorical_crossentropy(\n        \
+        \        true_class_idx, pred_class)\n\n            # 6. sum over (batch,\
+        \ gridx, gridy, anchors) => (batch, 1)\n            xy_loss = tf.reduce_sum(xy_loss,\
+        \ axis=(1, 2, 3))\n            wh_loss = tf.reduce_sum(wh_loss, axis=(1, 2,\
+        \ 3))\n            obj_loss = tf.reduce_sum(obj_loss, axis=(1, 2, 3))\n  \
+        \          class_loss = tf.reduce_sum(class_loss, axis=(1, 2, 3))\n\n    \
+        \        return xy_loss + wh_loss + obj_loss + class_loss\n        return\
+        \ yolo_loss\n\n    IMAGE_FEATURE_MAP = {\n        'image/encoded': tf.io.FixedLenFeature([],\
+        \ tf.string),\n        'image/object/bbox/xmin': tf.io.VarLenFeature(tf.float32),\n\
+        \        'image/object/bbox/ymin': tf.io.VarLenFeature(tf.float32),\n    \
+        \    'image/object/bbox/xmax': tf.io.VarLenFeature(tf.float32),\n        'image/object/bbox/ymax':\
+        \ tf.io.VarLenFeature(tf.float32),\n        'image/object/class/text': tf.io.VarLenFeature(tf.string),\n\
+        \    }\n\n    def parse_tfrecord(tfrecord, class_table, size):\n        x\
+        \ = tf.io.parse_single_example(tfrecord, IMAGE_FEATURE_MAP)\n        x_train\
+        \ = tf.image.decode_jpeg(x['image/encoded'], channels=3)\n        x_train\
+        \ = tf.image.resize(x_train, (size, size))\n\n        class_text = tf.sparse.to_dense(\n\
+        \            x['image/object/class/text'], default_value='')\n        labels\
+        \ = tf.cast(class_table.lookup(class_text), tf.float32)\n        y_train =\
+        \ tf.stack([tf.sparse.to_dense(x['image/object/bbox/xmin']),\n           \
+        \                 tf.sparse.to_dense(x['image/object/bbox/ymin']),\n     \
+        \                       tf.sparse.to_dense(x['image/object/bbox/xmax']),\n\
+        \                            tf.sparse.to_dense(x['image/object/bbox/ymax']),\n\
+        \                            labels], axis=1)\n\n        paddings = [[0, 100\
+        \ - tf.shape(y_train)[0]], [0, 0]]\n        y_train = tf.pad(y_train, paddings)\n\
+        \n        return x_train, y_train\n\n    def load_tfrecord_dataset(file_pattern,\
+        \ size=256):\n        keys_tensor = tf.constant(['negative', 'positive'])\n\
+        \        vals_tensor = tf.constant([0, 1])\n        init = tf.lookup.KeyValueTensorInitializer(keys_tensor,\
+        \ vals_tensor)\n        class_table = tf.lookup.StaticHashTable(init, default_value=-1)\n\
+        \        # LINE_NUMBER = -1  # TODO: use tf.lookup.TextFileIndex.LINE_NUMBER\n\
+        \        # class_table = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(\n\
+        \        #     class_file, tf.string, 0, tf.int64, LINE_NUMBER, delimiter=\"\
+        \\n\"), -1)\n        files = tf.data.Dataset.list_files(file_pattern)\n  \
+        \      dataset = files.flat_map(tf.data.TFRecordDataset)\n        return dataset.map(lambda\
+        \ x: parse_tfrecord(x, class_table, size))\n\n    @tf.function\n    def transform_targets_for_output(y_true,\
+        \ grid_size, anchor_idxs):\n        # y_true: (N, boxes, (x1, y1, x2, y2,\
+        \ class, best_anchor))\n        N = tf.shape(y_true)[0]\n\n        # y_true_out:\
+        \ (N, grid, grid, anchors, [x1, y1, x2, y2, obj, class])\n        y_true_out\
+        \ = tf.zeros(\n            (N, grid_size, grid_size, tf.shape(anchor_idxs)[0],\
+        \ 6))\n\n        anchor_idxs = tf.cast(anchor_idxs, tf.int32)\n\n        indexes\
+        \ = tf.TensorArray(tf.int32, 1, dynamic_size=True)\n        updates = tf.TensorArray(tf.float32,\
+        \ 1, dynamic_size=True)\n        idx = 0\n        for i in tf.range(N):\n\
+        \            for j in tf.range(tf.shape(y_true)[1]):\n                if tf.equal(y_true[i][j][2],\
+        \ 0):\n                    continue\n                anchor_eq = tf.equal(\n\
+        \                    anchor_idxs, tf.cast(y_true[i][j][5], tf.int32))\n\n\
+        \                if tf.reduce_any(anchor_eq):\n                    box = y_true[i][j][0:4]\n\
+        \                    box_xy = (y_true[i][j][0:2] + y_true[i][j][2:4]) / 2\n\
+        \n                    anchor_idx = tf.cast(tf.where(anchor_eq), tf.int32)\n\
+        \                    grid_xy = tf.cast(box_xy // (1/grid_size), tf.int32)\n\
+        \n                    # grid[y][x][anchor] = (tx, ty, bw, bh, obj, class)\n\
+        \                    indexes = indexes.write(\n                        idx,\
+        \ [i, grid_xy[1], grid_xy[0], anchor_idx[0][0]])\n                    updates\
+        \ = updates.write(\n                        idx, [box[0], box[1], box[2],\
+        \ box[3], 1, y_true[i][j][4]])\n                    idx += 1\n\n        #\
+        \ tf.print(indexes.stack())\n        # tf.print(updates.stack())\n\n     \
+        \   return tf.tensor_scatter_nd_update(\n            y_true_out, indexes.stack(),\
+        \ updates.stack())\n\n    def transform_targets(y_train, anchors, anchor_masks,\
+        \ size):\n        y_outs = []\n        grid_size = size // 32\n\n        #\
+        \ calculate anchor index for true boxes\n        anchors = tf.cast(anchors,\
+        \ tf.float32)\n        anchor_area = anchors[..., 0] * anchors[..., 1]\n \
+        \       box_wh = y_train[..., 2:4] - y_train[..., 0:2]\n        box_wh = tf.tile(tf.expand_dims(box_wh,\
+        \ -2),\n                        (1, 1, tf.shape(anchors)[0], 1))\n       \
+        \ box_area = box_wh[..., 0] * box_wh[..., 1]\n        intersection = tf.minimum(box_wh[...,\
+        \ 0], anchors[..., 0]) * \\\n            tf.minimum(box_wh[..., 1], anchors[...,\
+        \ 1])\n        iou = intersection / (box_area + anchor_area - intersection)\n\
+        \        anchor_idx = tf.cast(tf.argmax(iou, axis=-1), tf.float32)\n     \
+        \   anchor_idx = tf.expand_dims(anchor_idx, axis=-1)\n\n        y_train =\
+        \ tf.concat([y_train, anchor_idx], axis=-1)\n\n        for anchor_idxs in\
+        \ anchor_masks:\n            y_outs.append(transform_targets_for_output(\n\
+        \                y_train, grid_size, anchor_idxs))\n            grid_size\
+        \ *= 2\n\n        return tuple(y_outs)\n\n    def transform_images(x_train,\
+        \ size):\n        x_train = tf.image.resize(x_train, (size, size))\n     \
+        \   x_train = x_train / 255\n        return x_train\n\n    anchors = np.array([(10,\
+        \ 13), (16, 30), (33, 23), (30, 61), (62, 45),(59, 119), (116, 90), (156,\
+        \ 198), (373, 326)],np.float32) / 416\n    anchor_masks = np.array([[6, 7,\
+        \ 8], [3, 4, 5], [0, 1, 2]])\n\n    train_dataset = load_tfrecord_dataset(train_dataset)\n\
+        \    train_dataset = train_dataset.shuffle(buffer_size=512)\n    train_dataset\
+        \ = train_dataset.batch(8)\n    train_dataset = train_dataset.map(lambda x,\
+        \ y: (\n        transform_images(x, 256),\n        transform_targets(y, anchors,\
+        \ anchor_masks, 256)))\n    train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\
+        \n    val_dataset = load_tfrecord_dataset(val_dataset)\n    val_dataset =\
+        \ val_dataset.batch(8)\n    val_dataset = val_dataset.map(lambda x, y: (\n\
+        \        transform_images(x, 256),\n        transform_targets(y, anchors,\
+        \ anchor_masks, 256)))\n    val_dataset = val_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\
+        \n    model = tf.keras.models.load_model(loaded_model, custom_objects={'yolo_loss':[[YoloLoss(anchors[mask],\
+        \ classes=2) for mask in anchor_masks]]})\n\n    callbacks = [\n        ReduceLROnPlateau(verbose=1),\n\
+        \        EarlyStopping(patience=5, verbose=1),\n        ModelCheckpoint(\n\
+        \            filepath=trained_weights+'/trained_weights.tf',\n           \
+        \ save_weights_only=True,\n            monitor='val_loss',\n            mode='min',\n\
+        \            save_best_only=True\n        )\n    ]\n\n    import os\n    os.mkdir(trained_weights)\n\
+        \n    model.fit(train_dataset, epochs=1, callbacks=callbacks, validation_data=val_dataset)\
+        \    \n\n    print(os.listdir('tmp/outputs/trained_weights/'))\n\nimport argparse\n\
+        _parser = argparse.ArgumentParser(prog='Train model', description='')\n_parser.add_argument(\"\
+        --train-dataset\", dest=\"train_dataset\", type=str, required=True, default=argparse.SUPPRESS)\n\
+        _parser.add_argument(\"--val-dataset\", dest=\"val_dataset\", type=str, required=True,\
+        \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--loaded-model\", dest=\"\
+        loaded_model\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+        --trained-weights\", dest=\"trained_weights\", type=_make_parent_dirs_and_return_path,\
+        \ required=True, default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\
+        \n_outputs = train_model(**_parsed_args)\n"
+      image: tensorflow/tensorflow:2.2.0
+    inputs:
+      artifacts:
+      - {name: update-model-weights-loaded_model, path: /tmp/inputs/loaded_model/data}
+      - {name: load-train-data-train_dataset, path: /tmp/inputs/train_dataset/data}
+      - {name: load-train-data-val_dataset, path: /tmp/inputs/val_dataset/data}
+    outputs:
+      artifacts:
+      - {name: train-model-trained_weights, path: /tmp/outputs/trained_weights/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--train-dataset", {"inputPath": "train_dataset"}, "--val-dataset",
+          {"inputPath": "val_dataset"}, "--loaded-model", {"inputPath": "loaded_model"},
+          "--trained-weights", {"outputPath": "trained_weights"}], "command": ["sh",
+          "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+          ''numpy'' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+          --no-warn-script-location ''numpy'' --user) && \"$0\" \"$@\"", "sh", "-ec",
+          "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
+          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
+          file_path\n\ndef train_model(\n    train_dataset,\n    val_dataset,\n    loaded_model,\n    trained_weights\n):\n    import
+          numpy as np\n    import tensorflow as tf\n    from tensorflow.keras.callbacks
+          import (\n        ReduceLROnPlateau,\n        EarlyStopping,\n        ModelCheckpoint\n    )\n    from
+          tensorflow.keras.losses import (\n        binary_crossentropy,\n        sparse_categorical_crossentropy\n    )\n\n    def
+          _meshgrid(n_a, n_b):\n        return [\n            tf.reshape(tf.tile(tf.range(n_a),
+          [n_b]), (n_b, n_a)),\n            tf.reshape(tf.repeat(tf.range(n_b), n_a),
+          (n_b, n_a))\n        ]\n\n    def broadcast_iou(box_1, box_2):\n        #
+          box_1: (..., (x1, y1, x2, y2))\n        # box_2: (N, (x1, y1, x2, y2))\n\n        #
+          broadcast boxes\n        box_1 = tf.expand_dims(box_1, -2)\n        box_2
+          = tf.expand_dims(box_2, 0)\n        # new_shape: (..., N, (x1, y1, x2, y2))\n        new_shape
+          = tf.broadcast_dynamic_shape(tf.shape(box_1), tf.shape(box_2))\n        box_1
+          = tf.broadcast_to(box_1, new_shape)\n        box_2 = tf.broadcast_to(box_2,
+          new_shape)\n\n        int_w = tf.maximum(tf.minimum(box_1[..., 2], box_2[...,
+          2]) -\n                        tf.maximum(box_1[..., 0], box_2[..., 0]),
+          0)\n        int_h = tf.maximum(tf.minimum(box_1[..., 3], box_2[..., 3])
+          -\n                        tf.maximum(box_1[..., 1], box_2[..., 1]), 0)\n        int_area
+          = int_w * int_h\n        box_1_area = (box_1[..., 2] - box_1[..., 0]) *
+          \\\n            (box_1[..., 3] - box_1[..., 1])\n        box_2_area = (box_2[...,
+          2] - box_2[..., 0]) * \\\n            (box_2[..., 3] - box_2[..., 1])\n        return
+          int_area / (box_1_area + box_2_area - int_area)\n\n    def yolo_boxes(pred,
+          anchors, classes):\n        # pred: (batch_size, grid, grid, anchors, (x,
+          y, w, h, obj, ...classes))\n        grid_size = tf.shape(pred)[1:3]\n        box_xy,
+          box_wh, objectness, class_probs = tf.split(\n            pred, (2, 2, 1,
+          classes), axis=-1)\n\n        box_xy = tf.sigmoid(box_xy)\n        objectness
+          = tf.sigmoid(objectness)\n        class_probs = tf.sigmoid(class_probs)\n        pred_box
+          = tf.concat((box_xy, box_wh), axis=-1)  # original xywh for loss\n\n        #
+          !!! grid[x][y] == (y, x)\n        grid = _meshgrid(grid_size[1],grid_size[0])\n        grid
+          = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)  # [gx, gy, 1, 2]\n\n        box_xy
+          = (box_xy + tf.cast(grid, tf.float32)) / \\\n            tf.cast(grid_size,
+          tf.float32)\n        box_wh = tf.exp(box_wh) * anchors\n\n        box_x1y1
+          = box_xy - box_wh / 2\n        box_x2y2 = box_xy + box_wh / 2\n        bbox
+          = tf.concat([box_x1y1, box_x2y2], axis=-1)\n\n        return bbox, objectness,
+          class_probs, pred_box\n\n    def YoloLoss(anchors, classes=2, ignore_thresh=0.5):\n        def
+          yolo_loss(y_true, y_pred):\n            # 1. transform all pred outputs\n            #
+          y_pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...cls))\n            pred_box,
+          pred_obj, pred_class, pred_xywh = yolo_boxes(\n                y_pred, anchors,
+          classes)\n            pred_xy = pred_xywh[..., 0:2]\n            pred_wh
+          = pred_xywh[..., 2:4]\n\n            # 2. transform all true outputs\n            #
+          y_true: (batch_size, grid, grid, anchors, (x1, y1, x2, y2, obj, cls))\n            true_box,
+          true_obj, true_class_idx = tf.split(\n                y_true, (4, 1, 1),
+          axis=-1)\n            true_xy = (true_box[..., 0:2] + true_box[..., 2:4])
+          / 2\n            true_wh = true_box[..., 2:4] - true_box[..., 0:2]\n\n            #
+          give higher weights to small boxes\n            box_loss_scale = 2 - true_wh[...,
+          0] * true_wh[..., 1]\n\n            # 3. inverting the pred box equations\n            grid_size
+          = tf.shape(y_true)[1]\n            grid = tf.meshgrid(tf.range(grid_size),
+          tf.range(grid_size))\n            grid = tf.expand_dims(tf.stack(grid, axis=-1),
+          axis=2)\n            true_xy = true_xy * tf.cast(grid_size, tf.float32)
+          - \\\n                tf.cast(grid, tf.float32)\n            true_wh = tf.math.log(true_wh
+          / anchors)\n            true_wh = tf.where(tf.math.is_inf(true_wh),\n                            tf.zeros_like(true_wh),
+          true_wh)\n\n            # 4. calculate all masks\n            obj_mask =
+          tf.squeeze(true_obj, -1)\n            # ignore false positive when iou is
+          over threshold\n            best_iou = tf.map_fn(\n                lambda
+          x: tf.reduce_max(broadcast_iou(x[0], tf.boolean_mask(\n                    x[1],
+          tf.cast(x[2], tf.bool))), axis=-1),\n                (pred_box, true_box,
+          obj_mask),\n                tf.float32)\n            ignore_mask = tf.cast(best_iou
+          < ignore_thresh, tf.float32)\n\n            # 5. calculate all losses\n            xy_loss
+          = obj_mask * box_loss_scale * \\\n                tf.reduce_sum(tf.square(true_xy
+          - pred_xy), axis=-1)\n            wh_loss = obj_mask * box_loss_scale *
+          \\\n                tf.reduce_sum(tf.square(true_wh - pred_wh), axis=-1)\n            obj_loss
+          = binary_crossentropy(true_obj, pred_obj)\n            obj_loss = obj_mask
+          * obj_loss + \\\n                (1 - obj_mask) * ignore_mask * obj_loss\n            #
+          TODO: use binary_crossentropy instead\n            class_loss = obj_mask
+          * sparse_categorical_crossentropy(\n                true_class_idx, pred_class)\n\n            #
+          6. sum over (batch, gridx, gridy, anchors) => (batch, 1)\n            xy_loss
+          = tf.reduce_sum(xy_loss, axis=(1, 2, 3))\n            wh_loss = tf.reduce_sum(wh_loss,
+          axis=(1, 2, 3))\n            obj_loss = tf.reduce_sum(obj_loss, axis=(1,
+          2, 3))\n            class_loss = tf.reduce_sum(class_loss, axis=(1, 2, 3))\n\n            return
+          xy_loss + wh_loss + obj_loss + class_loss\n        return yolo_loss\n\n    IMAGE_FEATURE_MAP
+          = {\n        ''image/encoded'': tf.io.FixedLenFeature([], tf.string),\n        ''image/object/bbox/xmin'':
+          tf.io.VarLenFeature(tf.float32),\n        ''image/object/bbox/ymin'': tf.io.VarLenFeature(tf.float32),\n        ''image/object/bbox/xmax'':
+          tf.io.VarLenFeature(tf.float32),\n        ''image/object/bbox/ymax'': tf.io.VarLenFeature(tf.float32),\n        ''image/object/class/text'':
+          tf.io.VarLenFeature(tf.string),\n    }\n\n    def parse_tfrecord(tfrecord,
+          class_table, size):\n        x = tf.io.parse_single_example(tfrecord, IMAGE_FEATURE_MAP)\n        x_train
+          = tf.image.decode_jpeg(x[''image/encoded''], channels=3)\n        x_train
+          = tf.image.resize(x_train, (size, size))\n\n        class_text = tf.sparse.to_dense(\n            x[''image/object/class/text''],
+          default_value='''')\n        labels = tf.cast(class_table.lookup(class_text),
+          tf.float32)\n        y_train = tf.stack([tf.sparse.to_dense(x[''image/object/bbox/xmin'']),\n                            tf.sparse.to_dense(x[''image/object/bbox/ymin'']),\n                            tf.sparse.to_dense(x[''image/object/bbox/xmax'']),\n                            tf.sparse.to_dense(x[''image/object/bbox/ymax'']),\n                            labels],
+          axis=1)\n\n        paddings = [[0, 100 - tf.shape(y_train)[0]], [0, 0]]\n        y_train
+          = tf.pad(y_train, paddings)\n\n        return x_train, y_train\n\n    def
+          load_tfrecord_dataset(file_pattern, size=256):\n        keys_tensor = tf.constant([''negative'',
+          ''positive''])\n        vals_tensor = tf.constant([0, 1])\n        init
+          = tf.lookup.KeyValueTensorInitializer(keys_tensor, vals_tensor)\n        class_table
+          = tf.lookup.StaticHashTable(init, default_value=-1)\n        # LINE_NUMBER
+          = -1  # TODO: use tf.lookup.TextFileIndex.LINE_NUMBER\n        # class_table
+          = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(\n        #     class_file,
+          tf.string, 0, tf.int64, LINE_NUMBER, delimiter=\"\\n\"), -1)\n        files
+          = tf.data.Dataset.list_files(file_pattern)\n        dataset = files.flat_map(tf.data.TFRecordDataset)\n        return
+          dataset.map(lambda x: parse_tfrecord(x, class_table, size))\n\n    @tf.function\n    def
+          transform_targets_for_output(y_true, grid_size, anchor_idxs):\n        #
+          y_true: (N, boxes, (x1, y1, x2, y2, class, best_anchor))\n        N = tf.shape(y_true)[0]\n\n        #
+          y_true_out: (N, grid, grid, anchors, [x1, y1, x2, y2, obj, class])\n        y_true_out
+          = tf.zeros(\n            (N, grid_size, grid_size, tf.shape(anchor_idxs)[0],
+          6))\n\n        anchor_idxs = tf.cast(anchor_idxs, tf.int32)\n\n        indexes
+          = tf.TensorArray(tf.int32, 1, dynamic_size=True)\n        updates = tf.TensorArray(tf.float32,
+          1, dynamic_size=True)\n        idx = 0\n        for i in tf.range(N):\n            for
+          j in tf.range(tf.shape(y_true)[1]):\n                if tf.equal(y_true[i][j][2],
+          0):\n                    continue\n                anchor_eq = tf.equal(\n                    anchor_idxs,
+          tf.cast(y_true[i][j][5], tf.int32))\n\n                if tf.reduce_any(anchor_eq):\n                    box
+          = y_true[i][j][0:4]\n                    box_xy = (y_true[i][j][0:2] + y_true[i][j][2:4])
+          / 2\n\n                    anchor_idx = tf.cast(tf.where(anchor_eq), tf.int32)\n                    grid_xy
+          = tf.cast(box_xy // (1/grid_size), tf.int32)\n\n                    # grid[y][x][anchor]
+          = (tx, ty, bw, bh, obj, class)\n                    indexes = indexes.write(\n                        idx,
+          [i, grid_xy[1], grid_xy[0], anchor_idx[0][0]])\n                    updates
+          = updates.write(\n                        idx, [box[0], box[1], box[2],
+          box[3], 1, y_true[i][j][4]])\n                    idx += 1\n\n        #
+          tf.print(indexes.stack())\n        # tf.print(updates.stack())\n\n        return
+          tf.tensor_scatter_nd_update(\n            y_true_out, indexes.stack(), updates.stack())\n\n    def
+          transform_targets(y_train, anchors, anchor_masks, size):\n        y_outs
+          = []\n        grid_size = size // 32\n\n        # calculate anchor index
+          for true boxes\n        anchors = tf.cast(anchors, tf.float32)\n        anchor_area
+          = anchors[..., 0] * anchors[..., 1]\n        box_wh = y_train[..., 2:4]
+          - y_train[..., 0:2]\n        box_wh = tf.tile(tf.expand_dims(box_wh, -2),\n                        (1,
+          1, tf.shape(anchors)[0], 1))\n        box_area = box_wh[..., 0] * box_wh[...,
+          1]\n        intersection = tf.minimum(box_wh[..., 0], anchors[..., 0]) *
+          \\\n            tf.minimum(box_wh[..., 1], anchors[..., 1])\n        iou
+          = intersection / (box_area + anchor_area - intersection)\n        anchor_idx
+          = tf.cast(tf.argmax(iou, axis=-1), tf.float32)\n        anchor_idx = tf.expand_dims(anchor_idx,
+          axis=-1)\n\n        y_train = tf.concat([y_train, anchor_idx], axis=-1)\n\n        for
+          anchor_idxs in anchor_masks:\n            y_outs.append(transform_targets_for_output(\n                y_train,
+          grid_size, anchor_idxs))\n            grid_size *= 2\n\n        return tuple(y_outs)\n\n    def
+          transform_images(x_train, size):\n        x_train = tf.image.resize(x_train,
+          (size, size))\n        x_train = x_train / 255\n        return x_train\n\n    anchors
+          = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),(59, 119),
+          (116, 90), (156, 198), (373, 326)],np.float32) / 416\n    anchor_masks =
+          np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])\n\n    train_dataset = load_tfrecord_dataset(train_dataset)\n    train_dataset
+          = train_dataset.shuffle(buffer_size=512)\n    train_dataset = train_dataset.batch(8)\n    train_dataset
+          = train_dataset.map(lambda x, y: (\n        transform_images(x, 256),\n        transform_targets(y,
+          anchors, anchor_masks, 256)))\n    train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\n    val_dataset
+          = load_tfrecord_dataset(val_dataset)\n    val_dataset = val_dataset.batch(8)\n    val_dataset
+          = val_dataset.map(lambda x, y: (\n        transform_images(x, 256),\n        transform_targets(y,
+          anchors, anchor_masks, 256)))\n    val_dataset = val_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\n    model
+          = tf.keras.models.load_model(loaded_model, custom_objects={''yolo_loss'':[[YoloLoss(anchors[mask],
+          classes=2) for mask in anchor_masks]]})\n\n    callbacks = [\n        ReduceLROnPlateau(verbose=1),\n        EarlyStopping(patience=5,
+          verbose=1),\n        ModelCheckpoint(\n            filepath=trained_weights+''/trained_weights.tf'',\n            save_weights_only=True,\n            monitor=''val_loss'',\n            mode=''min'',\n            save_best_only=True\n        )\n    ]\n\n    import
+          os\n    os.mkdir(trained_weights)\n\n    model.fit(train_dataset, epochs=1,
+          callbacks=callbacks, validation_data=val_dataset)    \n\n    print(os.listdir(''tmp/outputs/trained_weights/''))\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Train model'', description='''')\n_parser.add_argument(\"--train-dataset\",
+          dest=\"train_dataset\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset\",
+          dest=\"val_dataset\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--loaded-model\",
+          dest=\"loaded_model\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--trained-weights\",
+          dest=\"trained_weights\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = train_model(**_parsed_args)\n"], "image": "tensorflow/tensorflow:2.2.0"}},
+          "inputs": [{"name": "train_dataset", "type": "Dataset"}, {"name": "val_dataset",
+          "type": "Dataset"}, {"name": "loaded_model", "type": "TFModel"}], "name":
+          "Train model", "outputs": [{"name": "trained_weights", "type": "Weights"}]}',
+        pipelines.kubeflow.org/component_ref: '{"digest": "691bb6288aef3b4daca843fdeddc723d7bec236551ac1090e486188bd97967ff",
+          "url": "./component-files/train_model_component.yaml"}'}
+  - name: update-model-weights
+    container:
+      args: [--pretrained-weights, /tmp/inputs/pretrained_weights/data, --compiled-model,
+        /tmp/inputs/compiled_model/data, --loaded-model, /tmp/outputs/loaded_model/data]
+      command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+        'numpy' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+        --no-warn-script-location 'numpy' --user) && "$0" "$@"
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def update_model_weights(
+            pretrained_weights,
+            compiled_model,
+            loaded_model
+        ):
+            import os
+            import numpy as np
+            import tensorflow as tf
+            from tensorflow.keras.losses import (
+                binary_crossentropy,
+                sparse_categorical_crossentropy
+            )
+
+            def _meshgrid(n_a, n_b):
+                return [
+                    tf.reshape(tf.tile(tf.range(n_a), [n_b]), (n_b, n_a)),
+                    tf.reshape(tf.repeat(tf.range(n_b), n_a), (n_b, n_a))
+                ]
+
+            def broadcast_iou(box_1, box_2):
+                # box_1: (..., (x1, y1, x2, y2))
+                # box_2: (N, (x1, y1, x2, y2))
+
+                # broadcast boxes
+                box_1 = tf.expand_dims(box_1, -2)
+                box_2 = tf.expand_dims(box_2, 0)
+                # new_shape: (..., N, (x1, y1, x2, y2))
+                new_shape = tf.broadcast_dynamic_shape(tf.shape(box_1), tf.shape(box_2))
+                box_1 = tf.broadcast_to(box_1, new_shape)
+                box_2 = tf.broadcast_to(box_2, new_shape)
+
+                int_w = tf.maximum(tf.minimum(box_1[..., 2], box_2[..., 2]) -
+                                tf.maximum(box_1[..., 0], box_2[..., 0]), 0)
+                int_h = tf.maximum(tf.minimum(box_1[..., 3], box_2[..., 3]) -
+                                tf.maximum(box_1[..., 1], box_2[..., 1]), 0)
+                int_area = int_w * int_h
+                box_1_area = (box_1[..., 2] - box_1[..., 0]) * \
+                    (box_1[..., 3] - box_1[..., 1])
+                box_2_area = (box_2[..., 2] - box_2[..., 0]) * \
+                    (box_2[..., 3] - box_2[..., 1])
+                return int_area / (box_1_area + box_2_area - int_area)
+
+            def yolo_boxes(pred, anchors, classes):
+                # pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))
+                grid_size = tf.shape(pred)[1:3]
+                box_xy, box_wh, objectness, class_probs = tf.split(
+                    pred, (2, 2, 1, classes), axis=-1)
+
+                box_xy = tf.sigmoid(box_xy)
+                objectness = tf.sigmoid(objectness)
+                class_probs = tf.sigmoid(class_probs)
+                pred_box = tf.concat((box_xy, box_wh), axis=-1)  # original xywh for loss
+
+                # !!! grid[x][y] == (y, x)
+                grid = _meshgrid(grid_size[1],grid_size[0])
+                grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)  # [gx, gy, 1, 2]
+
+                box_xy = (box_xy + tf.cast(grid, tf.float32)) / \
+                    tf.cast(grid_size, tf.float32)
+                box_wh = tf.exp(box_wh) * anchors
+
+                box_x1y1 = box_xy - box_wh / 2
+                box_x2y2 = box_xy + box_wh / 2
+                bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)
+
+                return bbox, objectness, class_probs, pred_box
+
+            def YoloLoss(anchors, classes=2, ignore_thresh=0.5):
+                def yolo_loss(y_true, y_pred):
+                    # 1. transform all pred outputs
+                    # y_pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...cls))
+                    pred_box, pred_obj, pred_class, pred_xywh = yolo_boxes(
+                        y_pred, anchors, classes)
+                    pred_xy = pred_xywh[..., 0:2]
+                    pred_wh = pred_xywh[..., 2:4]
+
+                    # 2. transform all true outputs
+                    # y_true: (batch_size, grid, grid, anchors, (x1, y1, x2, y2, obj, cls))
+                    true_box, true_obj, true_class_idx = tf.split(
+                        y_true, (4, 1, 1), axis=-1)
+                    true_xy = (true_box[..., 0:2] + true_box[..., 2:4]) / 2
+                    true_wh = true_box[..., 2:4] - true_box[..., 0:2]
+
+                    # give higher weights to small boxes
+                    box_loss_scale = 2 - true_wh[..., 0] * true_wh[..., 1]
+
+                    # 3. inverting the pred box equations
+                    grid_size = tf.shape(y_true)[1]
+                    grid = tf.meshgrid(tf.range(grid_size), tf.range(grid_size))
+                    grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
+                    true_xy = true_xy * tf.cast(grid_size, tf.float32) - \
+                        tf.cast(grid, tf.float32)
+                    true_wh = tf.math.log(true_wh / anchors)
+                    true_wh = tf.where(tf.math.is_inf(true_wh),
+                                    tf.zeros_like(true_wh), true_wh)
+
+                    # 4. calculate all masks
+                    obj_mask = tf.squeeze(true_obj, -1)
+                    # ignore false positive when iou is over threshold
+                    best_iou = tf.map_fn(
+                        lambda x: tf.reduce_max(broadcast_iou(x[0], tf.boolean_mask(
+                            x[1], tf.cast(x[2], tf.bool))), axis=-1),
+                        (pred_box, true_box, obj_mask),
+                        tf.float32)
+                    ignore_mask = tf.cast(best_iou < ignore_thresh, tf.float32)
+
+                    # 5. calculate all losses
+                    xy_loss = obj_mask * box_loss_scale * \
+                        tf.reduce_sum(tf.square(true_xy - pred_xy), axis=-1)
+                    wh_loss = obj_mask * box_loss_scale * \
+                        tf.reduce_sum(tf.square(true_wh - pred_wh), axis=-1)
+                    obj_loss = binary_crossentropy(true_obj, pred_obj)
+                    obj_loss = obj_mask * obj_loss + \
+                        (1 - obj_mask) * ignore_mask * obj_loss
+                    # TODO: use binary_crossentropy instead
+                    class_loss = obj_mask * sparse_categorical_crossentropy(
+                        true_class_idx, pred_class)
+
+                    # 6. sum over (batch, gridx, gridy, anchors) => (batch, 1)
+                    xy_loss = tf.reduce_sum(xy_loss, axis=(1, 2, 3))
+                    wh_loss = tf.reduce_sum(wh_loss, axis=(1, 2, 3))
+                    obj_loss = tf.reduce_sum(obj_loss, axis=(1, 2, 3))
+                    class_loss = tf.reduce_sum(class_loss, axis=(1, 2, 3))
+
+                    return xy_loss + wh_loss + obj_loss + class_loss
+                return yolo_loss
+
+            yolo_anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),
+                                 (59, 119), (116, 90), (156, 198), (373, 326)],
+                                np.float32) / 416
+            yolo_anchor_masks = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
+
+            model = tf.keras.models.load_model(compiled_model, custom_objects={'yolo_loss':[[YoloLoss(yolo_anchors[mask], classes=2) for mask in yolo_anchor_masks]]})
+            model.load_weights(pretrained_weights+'/axial_ckpt.tf')
+            model.save(loaded_model)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Update model weights', description='')
+        _parser.add_argument("--pretrained-weights", dest="pretrained_weights", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--compiled-model", dest="compiled_model", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--loaded-model", dest="loaded_model", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = update_model_weights(**_parsed_args)
+      image: tensorflow/tensorflow:2.2.0
+    inputs:
+      artifacts:
+      - {name: create-model-compiled_model, path: /tmp/inputs/compiled_model/data}
+      - {name: load-weights-pretrained_weights, path: /tmp/inputs/pretrained_weights/data}
+    outputs:
+      artifacts:
+      - {name: update-model-weights-loaded_model, path: /tmp/outputs/loaded_model/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--pretrained-weights", {"inputPath": "pretrained_weights"}, "--compiled-model",
+          {"inputPath": "compiled_model"}, "--loaded-model", {"outputPath": "loaded_model"}],
+          "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip
+          install --quiet --no-warn-script-location ''numpy'' || PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''numpy'' --user)
+          && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
+          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
+          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
+          file_path\n\ndef update_model_weights(\n    pretrained_weights,\n    compiled_model,\n    loaded_model\n):\n    import
+          os\n    import numpy as np\n    import tensorflow as tf\n    from tensorflow.keras.losses
+          import (\n        binary_crossentropy,\n        sparse_categorical_crossentropy\n    )\n\n    def
+          _meshgrid(n_a, n_b):\n        return [\n            tf.reshape(tf.tile(tf.range(n_a),
+          [n_b]), (n_b, n_a)),\n            tf.reshape(tf.repeat(tf.range(n_b), n_a),
+          (n_b, n_a))\n        ]\n\n    def broadcast_iou(box_1, box_2):\n        #
+          box_1: (..., (x1, y1, x2, y2))\n        # box_2: (N, (x1, y1, x2, y2))\n\n        #
+          broadcast boxes\n        box_1 = tf.expand_dims(box_1, -2)\n        box_2
+          = tf.expand_dims(box_2, 0)\n        # new_shape: (..., N, (x1, y1, x2, y2))\n        new_shape
+          = tf.broadcast_dynamic_shape(tf.shape(box_1), tf.shape(box_2))\n        box_1
+          = tf.broadcast_to(box_1, new_shape)\n        box_2 = tf.broadcast_to(box_2,
+          new_shape)\n\n        int_w = tf.maximum(tf.minimum(box_1[..., 2], box_2[...,
+          2]) -\n                        tf.maximum(box_1[..., 0], box_2[..., 0]),
+          0)\n        int_h = tf.maximum(tf.minimum(box_1[..., 3], box_2[..., 3])
+          -\n                        tf.maximum(box_1[..., 1], box_2[..., 1]), 0)\n        int_area
+          = int_w * int_h\n        box_1_area = (box_1[..., 2] - box_1[..., 0]) *
+          \\\n            (box_1[..., 3] - box_1[..., 1])\n        box_2_area = (box_2[...,
+          2] - box_2[..., 0]) * \\\n            (box_2[..., 3] - box_2[..., 1])\n        return
+          int_area / (box_1_area + box_2_area - int_area)\n\n    def yolo_boxes(pred,
+          anchors, classes):\n        # pred: (batch_size, grid, grid, anchors, (x,
+          y, w, h, obj, ...classes))\n        grid_size = tf.shape(pred)[1:3]\n        box_xy,
+          box_wh, objectness, class_probs = tf.split(\n            pred, (2, 2, 1,
+          classes), axis=-1)\n\n        box_xy = tf.sigmoid(box_xy)\n        objectness
+          = tf.sigmoid(objectness)\n        class_probs = tf.sigmoid(class_probs)\n        pred_box
+          = tf.concat((box_xy, box_wh), axis=-1)  # original xywh for loss\n\n        #
+          !!! grid[x][y] == (y, x)\n        grid = _meshgrid(grid_size[1],grid_size[0])\n        grid
+          = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)  # [gx, gy, 1, 2]\n\n        box_xy
+          = (box_xy + tf.cast(grid, tf.float32)) / \\\n            tf.cast(grid_size,
+          tf.float32)\n        box_wh = tf.exp(box_wh) * anchors\n\n        box_x1y1
+          = box_xy - box_wh / 2\n        box_x2y2 = box_xy + box_wh / 2\n        bbox
+          = tf.concat([box_x1y1, box_x2y2], axis=-1)\n\n        return bbox, objectness,
+          class_probs, pred_box\n\n    def YoloLoss(anchors, classes=2, ignore_thresh=0.5):\n        def
+          yolo_loss(y_true, y_pred):\n            # 1. transform all pred outputs\n            #
+          y_pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...cls))\n            pred_box,
+          pred_obj, pred_class, pred_xywh = yolo_boxes(\n                y_pred, anchors,
+          classes)\n            pred_xy = pred_xywh[..., 0:2]\n            pred_wh
+          = pred_xywh[..., 2:4]\n\n            # 2. transform all true outputs\n            #
+          y_true: (batch_size, grid, grid, anchors, (x1, y1, x2, y2, obj, cls))\n            true_box,
+          true_obj, true_class_idx = tf.split(\n                y_true, (4, 1, 1),
+          axis=-1)\n            true_xy = (true_box[..., 0:2] + true_box[..., 2:4])
+          / 2\n            true_wh = true_box[..., 2:4] - true_box[..., 0:2]\n\n            #
+          give higher weights to small boxes\n            box_loss_scale = 2 - true_wh[...,
+          0] * true_wh[..., 1]\n\n            # 3. inverting the pred box equations\n            grid_size
+          = tf.shape(y_true)[1]\n            grid = tf.meshgrid(tf.range(grid_size),
+          tf.range(grid_size))\n            grid = tf.expand_dims(tf.stack(grid, axis=-1),
+          axis=2)\n            true_xy = true_xy * tf.cast(grid_size, tf.float32)
+          - \\\n                tf.cast(grid, tf.float32)\n            true_wh = tf.math.log(true_wh
+          / anchors)\n            true_wh = tf.where(tf.math.is_inf(true_wh),\n                            tf.zeros_like(true_wh),
+          true_wh)\n\n            # 4. calculate all masks\n            obj_mask =
+          tf.squeeze(true_obj, -1)\n            # ignore false positive when iou is
+          over threshold\n            best_iou = tf.map_fn(\n                lambda
+          x: tf.reduce_max(broadcast_iou(x[0], tf.boolean_mask(\n                    x[1],
+          tf.cast(x[2], tf.bool))), axis=-1),\n                (pred_box, true_box,
+          obj_mask),\n                tf.float32)\n            ignore_mask = tf.cast(best_iou
+          < ignore_thresh, tf.float32)\n\n            # 5. calculate all losses\n            xy_loss
+          = obj_mask * box_loss_scale * \\\n                tf.reduce_sum(tf.square(true_xy
+          - pred_xy), axis=-1)\n            wh_loss = obj_mask * box_loss_scale *
+          \\\n                tf.reduce_sum(tf.square(true_wh - pred_wh), axis=-1)\n            obj_loss
+          = binary_crossentropy(true_obj, pred_obj)\n            obj_loss = obj_mask
+          * obj_loss + \\\n                (1 - obj_mask) * ignore_mask * obj_loss\n            #
+          TODO: use binary_crossentropy instead\n            class_loss = obj_mask
+          * sparse_categorical_crossentropy(\n                true_class_idx, pred_class)\n\n            #
+          6. sum over (batch, gridx, gridy, anchors) => (batch, 1)\n            xy_loss
+          = tf.reduce_sum(xy_loss, axis=(1, 2, 3))\n            wh_loss = tf.reduce_sum(wh_loss,
+          axis=(1, 2, 3))\n            obj_loss = tf.reduce_sum(obj_loss, axis=(1,
+          2, 3))\n            class_loss = tf.reduce_sum(class_loss, axis=(1, 2, 3))\n\n            return
+          xy_loss + wh_loss + obj_loss + class_loss\n        return yolo_loss\n\n    yolo_anchors
+          = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),\n                         (59,
+          119), (116, 90), (156, 198), (373, 326)],\n                        np.float32)
+          / 416\n    yolo_anchor_masks = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])\n\n    model
+          = tf.keras.models.load_model(compiled_model, custom_objects={''yolo_loss'':[[YoloLoss(yolo_anchors[mask],
+          classes=2) for mask in yolo_anchor_masks]]})\n    model.load_weights(pretrained_weights+''/axial_ckpt.tf'')\n    model.save(loaded_model)\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Update model weights'',
+          description='''')\n_parser.add_argument(\"--pretrained-weights\", dest=\"pretrained_weights\",
+          type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--compiled-model\",
+          dest=\"compiled_model\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--loaded-model\",
+          dest=\"loaded_model\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = update_model_weights(**_parsed_args)\n"], "image": "tensorflow/tensorflow:2.2.0"}},
+          "inputs": [{"name": "pretrained_weights", "type": "Weights"}, {"name": "compiled_model",
+          "type": "TFModel"}], "name": "Update model weights", "outputs": [{"name":
+          "loaded_model", "type": "TFModel"}]}', pipelines.kubeflow.org/component_ref: '{"digest":
+          "a067357de01330d26180d0148289489c1f7a8b4e149462f1945981f5c0225f09", "url":
+          "./component-files/update_model_weights_component.yaml"}'}
+  arguments:
+    parameters: []
+  serviceAccountName: pipeline-runner
