@@ -190,6 +190,7 @@ def main(_argv):
                         epoch, batch, total_loss.numpy(),
                         list(map(lambda x: np.sum(x.numpy()), pred_loss))))
                     avg_val_loss.update_state(total_loss)
+                    print(f'Validation-loss : {total_loss}')
 
 
             logging.info("{}, train: {}, val: {}".format(
