@@ -34,6 +34,7 @@ from tensorflow.keras.losses import (
     binary_crossentropy,
     sparse_categorical_crossentropy
 )
+import gdown
 
 
 output_dir = '/home/jovyan/output'
@@ -44,8 +45,8 @@ flags.DEFINE_float('yolo_iou_threshold', 0.5, 'iou threshold')
 flags.DEFINE_float('yolo_score_threshold', 0.5, 'score threshold')
 
 flags.DEFINE_string('names', 'brain', 'model names')
-flags.DEFINE_string('dataset', '/home/jovyan/matilda-platform-demo/brain_dataset/axial_brain_train.tfrecord', 'path to dataset')
-flags.DEFINE_string('val_dataset', '/home/jovyan/matilda-platform-demo/brain_dataset/axial_brain_val.tfrecord', 'path to validation dataset')
+flags.DEFINE_string('dataset', '/home/jovyan/matilda-platform-demo/axial_brain_train.tfrecord', 'path to dataset')
+flags.DEFINE_string('val_dataset', '/home/jovyan/matilda-platform-demo/axial_brain_val.tfrecord', 'path to validation dataset')
 flags.DEFINE_boolean('tiny', False, 'yolov3 or yolov3-tiny')
 flags.DEFINE_string('weights', './checkpoints/yolov3.tf',
                     'path to weights file')
@@ -81,6 +82,15 @@ yolo_tiny_anchors = np.array([(10, 14), (23, 27), (37, 58),
                               (81, 82), (135, 169),  (344, 319)],
                              np.float32) / 416
 yolo_tiny_anchor_masks = np.array([[3, 4, 5], [0, 1, 2]])
+
+def load_train_data():
+    train_dataset = '/home/jovyan/matilda-platform-demo/'
+    val_dataset = '/home/jovyan/matilda-platform-demo/'
+    dataset_url = 'https://drive.google.com/file/d/1Sq0bph5QJE5U_x-qu8hUcjgiTONeBDy1/view?usp=sharing'
+    gdown.download(dataset_url, output=train_dataset, quiet=True, fuzzy=True)
+    dataset_url = 'https://drive.google.com/file/d/172vMkaGKkol2x1juNzjWdEwNZrTyZnvz/view?usp=share_link'
+    gdown.download(dataset_url, output=val_dataset, quiet=True, fuzzy=True)
+    print(f'download complete!')
 
 
 def DarknetConv(x, filters, size, strides=1, batch_norm=True):
@@ -511,10 +521,14 @@ def parse_tfrecord(tfrecord, class_table, size):
     return x_train, y_train
 
 
-def load_tfrecord_dataset(file_pattern, class_file, size=416):
-    LINE_NUMBER = -1  # TODO: use tf.lookup.TextFileIndex.LINE_NUMBER
-    class_table = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(
-        class_file, tf.string, 0, tf.int64, LINE_NUMBER, delimiter="\n"), -1)
+def load_tfrecord_dataset(file_pattern, size=416):
+    keys_tensor = tf.constant(['negative', 'positive'])
+    vals_tensor = tf.constant([0, 1])
+    init = tf.lookup.KeyValueTensorInitializer(keys_tensor, vals_tensor)
+    class_table = tf.lookup.StaticHashTable(init, default_value=-1)
+#     LINE_NUMBER = -1  # TODO: use tf.lookup.TextFileIndex.LINE_NUMBER
+#     class_table = tf.lookup.StaticHashTable(tf.lookup.TextFileInitializer(
+#         class_file, tf.string, 0, tf.int64, LINE_NUMBER, delimiter="\n"), -1)
 
     files = tf.data.Dataset.list_files(file_pattern)
     dataset = files.flat_map(tf.data.TFRecordDataset)
@@ -765,6 +779,7 @@ def setup_model():
 
 
 def main(_argv):
+    load_train_data()
     physical_devices = tf.config.experimental.list_physical_devices('GPU')
 
     # Setup
@@ -784,7 +799,7 @@ def main(_argv):
 
     if FLAGS.dataset:
         train_dataset = load_tfrecord_dataset(
-            FLAGS.dataset, FLAGS.classes, FLAGS.size)
+            FLAGS.dataset, FLAGS.size)
     else:
         train_dataset = load_fake_dataset()
     train_dataset = train_dataset.shuffle(buffer_size=512)
@@ -797,7 +812,7 @@ def main(_argv):
 
     if FLAGS.val_dataset:
         val_dataset = load_tfrecord_dataset(
-            FLAGS.val_dataset, FLAGS.classes, FLAGS.size)
+            FLAGS.val_dataset, FLAGS.size)
         val_dataset = val_dataset.batch(FLAGS.batch_size)
         val_dataset = val_dataset.map(lambda x, y: (
             transform_images(x, FLAGS.size),
@@ -848,7 +863,7 @@ def main(_argv):
                         epoch, batch, total_loss.numpy(),
                         list(map(lambda x: np.sum(x.numpy()), pred_loss))))
                     avg_val_loss.update_state(total_loss)
-                    print(f'Validation-loss : {total_loss}')
+                    print(f'Validation-loss : {total_loss/100}')
 
 
             logging.info("{}, train: {}, val: {}".format(
