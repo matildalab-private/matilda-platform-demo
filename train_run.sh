@@ -8,7 +8,7 @@ echo "run generation ${DATASET_NAME} detection model"
 
 echo 'env settings ... '
 pip uninstall imageio
-pip install -r requirements.txt
+cat requirements.txt | xargs -n 1 pip install
 
 if [ $? -eq 0 ];then
 
