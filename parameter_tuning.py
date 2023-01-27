@@ -2,6 +2,8 @@ from absl import app, flags, logging
 from absl.flags import FLAGS
 
 import tensorflow as tf
+import pkg_resources
+pkg_resources.require("numpy==1.19.5")
 import numpy as np
 import cv2
 import time
@@ -781,7 +783,7 @@ def setup_model():
 def main(_argv):
     load_train_data()
     physical_devices = tf.config.experimental.list_physical_devices('GPU')
-
+    
     # Setup
     if FLAGS.multi_gpu:
         for physical_device in physical_devices:
@@ -873,10 +875,10 @@ def main(_argv):
 
             avg_loss.reset_states()
             avg_val_loss.reset_states()
-            model.save_weights(
-                f'{FLAGS.output}/yolov3_train_{epoch}.tf')
+#             model.save_weights(
+#                 f'{FLAGS.output}/yolov3_train_{epoch}.tf')
 
-        model.save(f'{output_dir}/{FLAGS.names}')
+#         model.save(f'{output_dir}/{FLAGS.names}')
 
         
     else:

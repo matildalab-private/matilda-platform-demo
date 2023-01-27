@@ -34,3 +34,5 @@ urllib3==1.26.14
 werkzeug==2.2.2
 wrapt==1.14.1
 zipp==3.11.0
+opencv-python==4.7.0.68
+gdown==4.6.0

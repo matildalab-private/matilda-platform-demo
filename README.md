@@ -1,5 +1,5 @@
 # matlida_platform_demo
-실제 matilda platform을 사용하여 모델을 학습부터 서빙까지의 과정을 진행하기 위한 YOLOV3 기반 학습 모델입니다.
+실제 matilda platform을 사용하여 모델을 학습부터 서빙까지의 과정을 진행하기 위한 YOLOV3 기반 학습 모델입니다.   
 참고 : `https://github.com/zzh8829/yolov3-tf2.git`
 
 ## 실행
