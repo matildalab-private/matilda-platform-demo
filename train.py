@@ -204,6 +204,7 @@ def main(_argv):
                 f'{FLAGS.output}/yolov3_train_{epoch}.tf')
 
         model.save(f'{FLAGS.output}/{FLAGS.names}')
+        tf.saved_model.save(model, f'{FLAGS.output}/{FLAGS.names}/1/')
 
         
     else:

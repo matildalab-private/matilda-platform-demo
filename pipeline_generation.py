@@ -1,20 +1,19 @@
-from kfp.components import InputPath, OutputPath
-from typing import List
+from kfp.components import InputPath, OutputPath, func_to_container_op
+from typing import List, NamedTuple
 import kfp
 from kfp import components, dsl
 import json
 
-
 def load_train_data(
+    dataset_name : str,
     train_dataset_url: str, 
-    val_dataset_url: str, 
-    train_dataset: OutputPath('Dataset'), 
-    val_dataset: OutputPath('Dataset')
-):
-    import gdown
-    gdown.download(train_dataset_url, output=train_dataset, quiet=True, fuzzy=True)
-    gdown.download(val_dataset_url, output=val_dataset, quiet=True, fuzzy=True)
-    print(f'download complete!')
+    val_dataset_url: str
+)-> NamedTuple('Outputs', [('text1', str), ('text2', str)]):
+    from time import sleep
+    print(f'{dataset_name} download start ...')
+    sleep(30)
+    print(f'download completed!')
+    return(train_dataset_url, val_dataset_url)
 
 load_train_data_op = components.create_component_from_func(
     load_train_data, 
@@ -22,26 +21,54 @@ load_train_data_op = components.create_component_from_func(
     packages_to_install=['gdown']
 )
 
+def augment_data(
+    train_dataset_url: str, 
+    val_dataset_url: str
+)-> NamedTuple('Outputs', [('text1', str), ('text2', str)]):
+    from time import sleep
+    sleep(30)
+    print(f'data augmentation completed!')
+    return (train_dataset_url, val_dataset_url)
 
-def load_test_img(img_url: str, input_img: OutputPath('jpg')):
+data_augmentation_op = components.create_component_from_func(
+    augment_data, 
+)
+
+def preprocess_data(
+    train_dataset_url: str, 
+    val_dataset_url: str, 
+    train_dataset_pcb: OutputPath('Dataset'), 
+    val_dataset_pcb: OutputPath('Dataset')
+):
+    import gdown
+    gdown.download(train_dataset_url, output=train_dataset_pcb, quiet=True, fuzzy=True)
+    gdown.download(val_dataset_url, output=val_dataset_pcb, quiet=True, fuzzy=True)
+    print(f'preprocess complete!')
+
+data_preprocess_op = components.create_component_from_func(
+    preprocess_data, 
+    packages_to_install=['gdown']
+)
+
+def load_test_data(img_url: str, input_img: OutputPath('jpg')):
     import gdown
     gdown.download(img_url, output=input_img, quiet=True, fuzzy=True)
     print(f'download complete!')
 
 load_test_img_op = components.create_component_from_func(
-    load_test_img, 
+    load_test_data, 
     # output_component_file='./component-files-yaml/load_test_img_component.yaml',
     packages_to_install=['gdown']
 )
 
 
-def load_weights(checkpoint_url: str, pretrained_weights: OutputPath('Weights')):
+def load_pretrained_weights(checkpoint_url: str, pretrained_weights: OutputPath('Weights')):
     import gdown
     gdown.download_folder(checkpoint_url, output=pretrained_weights, quiet=True, use_cookies=False)
     print(f'download complete!')
 
 load_weights_op = components.create_component_from_func(
-    load_weights,
+    load_pretrained_weights,
     # output_component_file='./component-files-yaml/load_weights_component.yaml',
     packages_to_install=['gdown']
 )
@@ -54,8 +81,8 @@ def train_model(
     class_names: List[str],
     checkpoint_name: str,
     pretrained_weights: InputPath('Weights'),
-    train_dataset: InputPath('Dataset'),
-    val_dataset: InputPath('Dataset'),
+    train_dataset_pcb: InputPath('Dataset'),
+    val_dataset_pcb: InputPath('Dataset'),
     trained_weights: OutputPath('Weights')
 ):
     from yolov3_minimal import load_tfrecord_dataset, transform_images, transform_targets, YoloV3, YoloLoss, freeze_all
@@ -75,7 +102,7 @@ def train_model(
     anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61), (62, 45),(59, 119), (116, 90), (156, 198), (373, 326)],np.float32) / 416
     anchor_masks = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
 
-    train_dataset = load_tfrecord_dataset(train_dataset, class_names, SIZE)
+    train_dataset = load_tfrecord_dataset(train_dataset_pcb, class_names, SIZE)
     train_dataset = train_dataset.shuffle(buffer_size=512)
     train_dataset = train_dataset.batch(8)
     train_dataset = train_dataset.map(lambda x, y: (
@@ -83,7 +110,7 @@ def train_model(
         transform_targets(y, anchors, anchor_masks, SIZE)))
     train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
-    val_dataset = load_tfrecord_dataset(val_dataset, class_names, SIZE)
+    val_dataset = load_tfrecord_dataset(val_dataset_pcb, class_names, SIZE)
     val_dataset = val_dataset.batch(8)
     val_dataset = val_dataset.map(lambda x, y: (
         transform_images(x, SIZE),
@@ -123,7 +150,7 @@ train_model_op = components.create_component_from_func(
 )
 
 
-def test(
+def evaluate_model(
     model_size: int,
     num_classes: int,
     class_names: List[str],
@@ -156,25 +183,37 @@ def test(
     cv2.imwrite(output_img+'/output.jpg', img)
 
 test_op = components.create_component_from_func(
-    test,
+    evaluate_model,
     # output_component_file='./component-files-yaml/test_component.yaml',
     packages_to_install=['yolov3-minimal']
 )
 
-def serve(temp_var: InputPath('jpg')):
+def serve_model(temp_var: InputPath('jpg')):
     if temp_var:
         print('Model served successfully.')
     else:
         print('There was an error serving the model.')
 
 serve_op = components.create_component_from_func(
-    serve,
+    serve_model,
+    # output_component_file='./component-files-yaml/serve_component.yaml'
+)
+
+def save_model(temp_var: InputPath('jpg')):
+    if temp_var:
+        print('Model served successfully.')
+    else:
+        print('There was an error serving the model.')
+
+saved_model_op = components.create_component_from_func(
+    save_model,
     # output_component_file='./component-files-yaml/serve_component.yaml'
 )
 
 @dsl.pipeline(name='YOLOv3 pipeline')
 def yolov3_pipeline(
     # brain tumor
+    # dataset_name = "brain tumor dataset",
     # train_dataset_url="https://drive.google.com/file/d/1Sq0bph5QJE5U_x-qu8hUcjgiTONeBDy1/view?usp=sharing",
     # val_dataset_url="https://drive.google.com/file/d/172vMkaGKkol2x1juNzjWdEwNZrTyZnvz/view?usp=share_link",
     # checkpoint_url="https://drive.google.com/drive/folders/1-C3N6h-CtdojHjEyFvXGXBorDFBo_k4z?usp=share_link",
@@ -185,6 +224,7 @@ def yolov3_pipeline(
     # num_epochs='1',
     # class_names='["negative", "positive"]'
     # pcb defect
+    dataset_name = "pcb defect dataset",
     train_dataset_url="https://drive.google.com/file/d/1qn0mLFV7NBbmw6-ZTuF_tN_oJxRHx-XR/view?usp=sharing",
     val_dataset_url="https://drive.google.com/file/d/1gUCWhls3ZyVurdYFl1iikRUlDHmKi4ZQ/view?usp=sharing",
     checkpoint_url="https://drive.google.com/drive/folders/1btey4JhgBRkoJneGKkvBLTDAuOMfPNmV?usp=share_link",
@@ -193,11 +233,19 @@ def yolov3_pipeline(
     model_size='416',
     num_classes='6',
     num_epochs='1',
-    class_names='[‘missing_hole’, ‘mouse_bite’, ‘open_circuit’, ‘short’, ‘spur’, ‘spurious_copper’]'
+    class_names='["missing_hole", "mouse_bite", "open_circuit", "short", "spur", "spurious_copper"]'
 ):
 
-    load_data_task = load_train_data_op(train_dataset_url, val_dataset_url)
+    load_data_task = load_train_data_op(dataset_name, train_dataset_url, val_dataset_url)
     load_weights_task = load_weights_op(checkpoint_url)
+
+    data_augmentation_task = data_augmentation_op(
+        load_data_task.outputs['text1'],
+        load_data_task.outputs['text2'])
+    
+    data_preprocess_task = data_preprocess_op(
+        data_augmentation_task.outputs['text1'],
+        data_augmentation_task.outputs['text2'])
 
     train_model_task = train_model_op(
         model_size,
@@ -206,8 +254,8 @@ def yolov3_pipeline(
         class_names,
         checkpoint_name,
         load_weights_task.outputs['pretrained_weights'],
-        load_data_task.outputs['train_dataset'],
-        load_data_task.outputs['val_dataset'],
+        data_preprocess_task.outputs['train_dataset_pcb'],
+        data_preprocess_task.outputs['val_dataset_pcb'],
     )
 
     load_test_img_task = load_test_img_op(test_img_url)
@@ -221,5 +269,6 @@ def yolov3_pipeline(
     )
 
     serve_op(test_task.output)
+    saved_model_op(test_task.output)
 
-kfp.compiler.Compiler().compile(yolov3_pipeline, 'pipeline.yaml')
+kfp.compiler.Compiler().compile(yolov3_pipeline, 'pcb_pipeline.yaml')
