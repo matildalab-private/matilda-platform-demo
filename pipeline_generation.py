@@ -4,51 +4,13 @@ import kfp
 from kfp import components, dsl
 import json
 
-def load_train_data(
-    dataset_name : str,
-    train_dataset_url: str, 
-    val_dataset_url: str
-)-> NamedTuple('Outputs', [('text1', str), ('text2', str)]):
-    from time import sleep
-    print(f'{dataset_name} download start ...')
-    sleep(30)
-    print(f'download completed!')
-    return(train_dataset_url, val_dataset_url)
-
-load_train_data_op = components.create_component_from_func(
-    load_train_data, 
-    # output_component_file='./component-files-yaml/load_train_data_component.yaml',
-    packages_to_install=['gdown']
-)
-
-def augment_data(
-    train_dataset_url: str, 
-    val_dataset_url: str
-)-> NamedTuple('Outputs', [('text1', str), ('text2', str)]):
-    from time import sleep
-    sleep(30)
-    print(f'data augmentation completed!')
-    return (train_dataset_url, val_dataset_url)
-
-data_augmentation_op = components.create_component_from_func(
-    augment_data, 
-)
-
-def preprocess_data(
-    train_dataset_url: str, 
-    val_dataset_url: str, 
-    train_dataset_pcb: OutputPath('Dataset'), 
-    val_dataset_pcb: OutputPath('Dataset')
-):
-    import gdown
-    gdown.download(train_dataset_url, output=train_dataset_pcb, quiet=True, fuzzy=True)
-    gdown.download(val_dataset_url, output=val_dataset_pcb, quiet=True, fuzzy=True)
-    print(f'preprocess complete!')
-
-data_preprocess_op = components.create_component_from_func(
-    preprocess_data, 
-    packages_to_install=['gdown']
-)
+## 아래 내용을 파악한 후 한글을 포함한 주석은 모두 삭제한 후 python 코드를 실행해주세요 (한글 포함 시 파이프라인 생성 후 에러 발생)
+## 해당 파이프라인 템플릿은 YOLOv3를 사용한 Object detection 모델을 구현할 수 있습니다.
+## tfrecord 형식의 train, validation 데이터셋을 필요로 합니다.
+## pretrained weight 와 test를 진행할 이미지도 필요합니다.
+## 마지막으로 클래스 정보와 이미지 사이즈, epochs 를 입력합니다.
+## 위 정보를 파라미터로 받는것은 [yolov3_pipeline] 함수에 있으며 파라미터 수정만으로 다른 데이터셋을 학습할 수 있습니다.
+## 219번째 줄에서 확인할 수 있습니다.
 
 def load_test_data(img_url: str, input_img: OutputPath('jpg')):
     import gdown
@@ -62,13 +24,13 @@ load_test_img_op = components.create_component_from_func(
 )
 
 
-def load_pretrained_weights(checkpoint_url: str, pretrained_weights: OutputPath('Weights')):
+def load_YOLOv3_pretrained_weights(checkpoint_url: str, pretrained_weights: OutputPath('Weights')):
     import gdown
     gdown.download_folder(checkpoint_url, output=pretrained_weights, quiet=True, use_cookies=False)
     print(f'download complete!')
 
 load_weights_op = components.create_component_from_func(
-    load_pretrained_weights,
+    load_YOLOv3_pretrained_weights,
     # output_component_file='./component-files-yaml/load_weights_component.yaml',
     packages_to_install=['gdown']
 )
@@ -147,6 +109,48 @@ train_model_op = components.create_component_from_func(
     train_model,
     # output_component_file='./component-files-yaml/train_model_component.yaml',
     packages_to_install=['yolov3-minimal']
+)
+
+def load_train_data(
+    dataset_name : str,
+    train_dataset_url: str, 
+    val_dataset_url: str
+)-> NamedTuple('Outputs', [('text1', str), ('text2', str)]):
+    print(f'{dataset_name} download start ...')
+    print(f'download completed!')
+    return(train_dataset_url, val_dataset_url)
+
+load_train_data_op = components.create_component_from_func(
+    load_train_data, 
+    # output_component_file='./component-files-yaml/load_train_data_component.yaml',
+    packages_to_install=['gdown']
+)
+
+def augment_data(
+    train_dataset_url: str, 
+    val_dataset_url: str
+)-> NamedTuple('Outputs', [('text1', str), ('text2', str)]):
+    print(f'data augmentation completed!')
+    return (train_dataset_url, val_dataset_url)
+
+data_augmentation_op = components.create_component_from_func(
+    augment_data, 
+)
+
+def preprocess_data(
+    train_dataset_url: str, 
+    val_dataset_url: str, 
+    train_dataset_pcb: OutputPath('Dataset'), 
+    val_dataset_pcb: OutputPath('Dataset')
+):
+    import gdown
+    gdown.download(train_dataset_url, output=train_dataset_pcb, quiet=True, fuzzy=True)
+    gdown.download(val_dataset_url, output=val_dataset_pcb, quiet=True, fuzzy=True)
+    print(f'preprocess complete!')
+
+data_preprocess_op = components.create_component_from_func(
+    preprocess_data, 
+    packages_to_install=['gdown']
 )
 
 
@@ -271,4 +275,4 @@ def yolov3_pipeline(
     serve_op(test_task.output)
     saved_model_op(test_task.output)
 
-kfp.compiler.Compiler().compile(yolov3_pipeline, 'pcb_pipeline.yaml')
+kfp.compiler.Compiler().compile(yolov3_pipeline, 'pipeline.yaml')

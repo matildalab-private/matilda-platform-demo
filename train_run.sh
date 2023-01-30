@@ -26,7 +26,7 @@ if [ $? -eq 0 ];then
     python train.py \
         --names pcb \
         --batch_size 8 \
-        --dataset ./pcb_dataset/pcb_dataset.tfrecord \
+        --dataset ./pcb_dataset/pcb_train_dataset.tfrecord \
         --epochs 2 --classes ./pcb_dataset/pcb.names \
         --num_classes 6 --size 416 \
         --mode eager_tf \

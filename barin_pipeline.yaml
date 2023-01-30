@@ -2,7 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   generateName: yolov3-pipeline-
-  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.18, pipelines.kubeflow.org/pipeline_compilation_time: '2023-01-30T11:33:14.472868',
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.18, pipelines.kubeflow.org/pipeline_compilation_time: '2023-01-30T11:40:24.352487',
     pipelines.kubeflow.org/pipeline_spec: '{"inputs": [{"default": "pcb defect dataset",
       "name": "dataset_name", "optional": true}, {"default": "https://drive.google.com/file/d/1qn0mLFV7NBbmw6-ZTuF_tN_oJxRHx-XR/view?usp=sharing",
       "name": "train_dataset_url", "optional": true}, {"default": "https://drive.google.com/file/d/1gUCWhls3ZyVurdYFl1iikRUlDHmKi4ZQ/view?usp=sharing",
@@ -20,8 +20,8 @@ spec:
   templates:
   - name: augment-data
     container:
-      args: [--train-dataset-url, '{{inputs.parameters.load-train-pcb-data-text1}}',
-        --val-dataset-url, '{{inputs.parameters.load-train-pcb-data-text2}}', '----output-paths',
+      args: [--train-dataset-url, '{{inputs.parameters.load-train-barin-data-text1}}',
+        --val-dataset-url, '{{inputs.parameters.load-train-barin-data-text2}}', '----output-paths',
         /tmp/outputs/text1/data, /tmp/outputs/text2/data]
       command:
       - sh
@@ -50,8 +50,8 @@ spec:
       image: python:3.7
     inputs:
       parameters:
-      - {name: load-train-pcb-data-text1}
-      - {name: load-train-pcb-data-text2}
+      - {name: load-train-barin-data-text1}
+      - {name: load-train-barin-data-text2}
     outputs:
       parameters:
       - name: augment-data-text1
@@ -89,7 +89,8 @@ spec:
           "String"}, {"name": "val_dataset_url", "type": "String"}], "name": "Augment
           data", "outputs": [{"name": "text1", "type": "String"}, {"name": "text2",
           "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"train_dataset_url":
-          "{{inputs.parameters.load-train-pcb-data-text1}}", "val_dataset_url": "{{inputs.parameters.load-train-pcb-data-text2}}"}'}
+          "{{inputs.parameters.load-train-barin-data-text1}}", "val_dataset_url":
+          "{{inputs.parameters.load-train-barin-data-text2}}"}'}
   - name: evaluate-model
     container:
       args: [--model-size, '{{inputs.parameters.model_size}}', --num-classes, '{{inputs.parameters.num_classes}}',
@@ -164,7 +165,7 @@ spec:
       - {name: model_size}
       - {name: num_classes}
       artifacts:
-      - {name: load-test-pcb-data-input_img, path: /tmp/inputs/input_img/data}
+      - {name: load-test-brain-data-input_img, path: /tmp/inputs/input_img/data}
       - {name: train-model-trained_weights, path: /tmp/inputs/trained_weights/data}
     outputs:
       artifacts:
@@ -211,7 +212,7 @@ spec:
         pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"class_names":
           "{{inputs.parameters.class_names}}", "model_size": "{{inputs.parameters.model_size}}",
           "num_classes": "{{inputs.parameters.num_classes}}"}'}
-  - name: load-test-pcb-data
+  - name: load-test-brain-data
     container:
       args: [--img-url, '{{inputs.parameters.test_img_url}}', --input-img, /tmp/outputs/input_img/data]
       command:
@@ -232,25 +233,25 @@ spec:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             return file_path
 
-        def load_test_PCB_data(img_url, input_img):
+        def load_test_brain_data(img_url, input_img):
             import gdown
             gdown.download(img_url, output=input_img, quiet=True, fuzzy=True)
             print(f'download complete!')
 
         import argparse
-        _parser = argparse.ArgumentParser(prog='Load test PCB data', description='')
+        _parser = argparse.ArgumentParser(prog='Load test brain data', description='')
         _parser.add_argument("--img-url", dest="img_url", type=str, required=True, default=argparse.SUPPRESS)
         _parser.add_argument("--input-img", dest="input_img", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
         _parsed_args = vars(_parser.parse_args())
 
-        _outputs = load_test_PCB_data(**_parsed_args)
+        _outputs = load_test_brain_data(**_parsed_args)
       image: python:3.7
     inputs:
       parameters:
       - {name: test_img_url}
     outputs:
       artifacts:
-      - {name: load-test-pcb-data-input_img, path: /tmp/outputs/input_img/data}
+      - {name: load-test-brain-data-input_img, path: /tmp/outputs/input_img/data}
     metadata:
       labels:
         pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
@@ -264,18 +265,18 @@ spec:
           && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
           > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
           str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
-          file_path\n\ndef load_test_PCB_data(img_url, input_img):\n    import gdown\n    gdown.download(img_url,
+          file_path\n\ndef load_test_brain_data(img_url, input_img):\n    import gdown\n    gdown.download(img_url,
           output=input_img, quiet=True, fuzzy=True)\n    print(f''download complete!'')\n\nimport
-          argparse\n_parser = argparse.ArgumentParser(prog=''Load test PCB data'',
+          argparse\n_parser = argparse.ArgumentParser(prog=''Load test brain data'',
           description='''')\n_parser.add_argument(\"--img-url\", dest=\"img_url\",
           type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--input-img\",
           dest=\"input_img\", type=_make_parent_dirs_and_return_path, required=True,
           default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
-          = load_test_PCB_data(**_parsed_args)\n"], "image": "python:3.7"}}, "inputs":
-          [{"name": "img_url", "type": "String"}], "name": "Load test PCB data", "outputs":
-          [{"name": "input_img", "type": "jpg"}]}', pipelines.kubeflow.org/component_ref: '{}',
+          = load_test_brain_data(**_parsed_args)\n"], "image": "python:3.7"}}, "inputs":
+          [{"name": "img_url", "type": "String"}], "name": "Load test brain data",
+          "outputs": [{"name": "input_img", "type": "jpg"}]}', pipelines.kubeflow.org/component_ref: '{}',
         pipelines.kubeflow.org/arguments.parameters: '{"img_url": "{{inputs.parameters.test_img_url}}"}'}
-  - name: load-train-pcb-data
+  - name: load-train-barin-data
     container:
       args: [--dataset-name, '{{inputs.parameters.dataset_name}}', --train-dataset-url,
         '{{inputs.parameters.train_dataset_url}}', --val-dataset-url, '{{inputs.parameters.val_dataset_url}}',
@@ -292,21 +293,21 @@ spec:
         program_path=$(mktemp)
         printf "%s" "$0" > "$program_path"
         python3 -u "$program_path" "$@"
-      - "def load_train_PCB_data(\n    dataset_name,\n    train_dataset_url, \n  \
-        \  val_dataset_url\n):\n    from time import sleep\n    print(f'{dataset_name}\
+      - "def load_train_barin_data(\n    dataset_name,\n    train_dataset_url, \n\
+        \    val_dataset_url\n):\n    from time import sleep\n    print(f'{dataset_name}\
         \ download start ...')\n    sleep(30)\n    print(f'download completed!')\n\
         \    return(train_dataset_url, val_dataset_url)\n\ndef _serialize_str(str_value:\
         \ str) -> str:\n    if not isinstance(str_value, str):\n        raise TypeError('Value\
         \ \"{}\" has type \"{}\" instead of str.'.format(\n            str(str_value),\
         \ str(type(str_value))))\n    return str_value\n\nimport argparse\n_parser\
-        \ = argparse.ArgumentParser(prog='Load train PCB data', description='')\n\
+        \ = argparse.ArgumentParser(prog='Load train barin data', description='')\n\
         _parser.add_argument(\"--dataset-name\", dest=\"dataset_name\", type=str,\
         \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--train-dataset-url\"\
         , dest=\"train_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n\
         _parser.add_argument(\"--val-dataset-url\", dest=\"val_dataset_url\", type=str,\
         \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\"\
         , dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args = vars(_parser.parse_args())\n\
-        _output_files = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = load_train_PCB_data(**_parsed_args)\n\
+        _output_files = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = load_train_barin_data(**_parsed_args)\n\
         \n_output_serializers = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\
         \nimport os\nfor idx, output_file in enumerate(_output_files):\n    try:\n\
         \        os.makedirs(os.path.dirname(output_file))\n    except OSError:\n\
@@ -319,13 +320,13 @@ spec:
       - {name: val_dataset_url}
     outputs:
       parameters:
-      - name: load-train-pcb-data-text1
+      - name: load-train-barin-data-text1
         valueFrom: {path: /tmp/outputs/text1/data}
-      - name: load-train-pcb-data-text2
+      - name: load-train-barin-data-text2
         valueFrom: {path: /tmp/outputs/text2/data}
       artifacts:
-      - {name: load-train-pcb-data-text1, path: /tmp/outputs/text1/data}
-      - {name: load-train-pcb-data-text2, path: /tmp/outputs/text2/data}
+      - {name: load-train-barin-data-text1, path: /tmp/outputs/text1/data}
+      - {name: load-train-barin-data-text2, path: /tmp/outputs/text2/data}
     metadata:
       labels:
         pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
@@ -339,25 +340,25 @@ spec:
           -m pip install --quiet --no-warn-script-location ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1
           python3 -m pip install --quiet --no-warn-script-location ''gdown'' --user)
           && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
-          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def load_train_PCB_data(\n    dataset_name,\n    train_dataset_url,
+          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def load_train_barin_data(\n    dataset_name,\n    train_dataset_url,
           \n    val_dataset_url\n):\n    from time import sleep\n    print(f''{dataset_name}
           download start ...'')\n    sleep(30)\n    print(f''download completed!'')\n    return(train_dataset_url,
           val_dataset_url)\n\ndef _serialize_str(str_value: str) -> str:\n    if not
           isinstance(str_value, str):\n        raise TypeError(''Value \"{}\" has
           type \"{}\" instead of str.''.format(\n            str(str_value), str(type(str_value))))\n    return
           str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Load
-          train PCB data'', description='''')\n_parser.add_argument(\"--dataset-name\",
+          train barin data'', description='''')\n_parser.add_argument(\"--dataset-name\",
           dest=\"dataset_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--train-dataset-url\",
           dest=\"train_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-url\",
           dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
           dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args = vars(_parser.parse_args())\n_output_files
-          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = load_train_PCB_data(**_parsed_args)\n\n_output_serializers
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = load_train_barin_data(**_parsed_args)\n\n_output_serializers
           = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,
           output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
           OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
           "image": "python:3.7"}}, "inputs": [{"name": "dataset_name", "type": "String"},
           {"name": "train_dataset_url", "type": "String"}, {"name": "val_dataset_url",
-          "type": "String"}], "name": "Load train PCB data", "outputs": [{"name":
+          "type": "String"}], "name": "Load train barin data", "outputs": [{"name":
           "text1", "type": "String"}, {"name": "text2", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}',
         pipelines.kubeflow.org/arguments.parameters: '{"dataset_name": "{{inputs.parameters.dataset_name}}",
           "train_dataset_url": "{{inputs.parameters.train_dataset_url}}", "val_dataset_url":
@@ -750,29 +751,29 @@ spec:
       tasks:
       - name: augment-data
         template: augment-data
-        dependencies: [load-train-pcb-data]
+        dependencies: [load-train-barin-data]
         arguments:
           parameters:
-          - {name: load-train-pcb-data-text1, value: '{{tasks.load-train-pcb-data.outputs.parameters.load-train-pcb-data-text1}}'}
-          - {name: load-train-pcb-data-text2, value: '{{tasks.load-train-pcb-data.outputs.parameters.load-train-pcb-data-text2}}'}
+          - {name: load-train-barin-data-text1, value: '{{tasks.load-train-barin-data.outputs.parameters.load-train-barin-data-text1}}'}
+          - {name: load-train-barin-data-text2, value: '{{tasks.load-train-barin-data.outputs.parameters.load-train-barin-data-text2}}'}
       - name: evaluate-model
         template: evaluate-model
-        dependencies: [load-test-pcb-data, train-model]
+        dependencies: [load-test-brain-data, train-model]
         arguments:
           parameters:
           - {name: class_names, value: '{{inputs.parameters.class_names}}'}
           - {name: model_size, value: '{{inputs.parameters.model_size}}'}
           - {name: num_classes, value: '{{inputs.parameters.num_classes}}'}
           artifacts:
-          - {name: load-test-pcb-data-input_img, from: '{{tasks.load-test-pcb-data.outputs.artifacts.load-test-pcb-data-input_img}}'}
+          - {name: load-test-brain-data-input_img, from: '{{tasks.load-test-brain-data.outputs.artifacts.load-test-brain-data-input_img}}'}
           - {name: train-model-trained_weights, from: '{{tasks.train-model.outputs.artifacts.train-model-trained_weights}}'}
-      - name: load-test-pcb-data
-        template: load-test-pcb-data
+      - name: load-test-brain-data
+        template: load-test-brain-data
         arguments:
           parameters:
           - {name: test_img_url, value: '{{inputs.parameters.test_img_url}}'}
-      - name: load-train-pcb-data
-        template: load-train-pcb-data
+      - name: load-train-barin-data
+        template: load-train-barin-data
         arguments:
           parameters:
           - {name: dataset_name, value: '{{inputs.parameters.dataset_name}}'}
