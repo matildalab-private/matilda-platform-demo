@@ -4,13 +4,13 @@ import kfp
 from kfp import components, dsl
 import json
 
-## 아래 내용을 파악한 후 한글을 포함한 주석은 모두 삭제한 후 python 코드를 실행해주세요 (한글 포함 시 파이프라인 생성 후 에러 발생)
-## 해당 파이프라인 템플릿은 YOLOv3를 사용한 Object detection 모델을 구현할 수 있습니다.
-## tfrecord 형식의 train, validation 데이터셋을 필요로 합니다.
-## pretrained weight 와 test를 진행할 이미지도 필요합니다.
-## 마지막으로 클래스 정보와 이미지 사이즈, epochs 를 입력합니다.
-## 위 정보를 파라미터로 받는것은 [yolov3_pipeline] 함수에 있으며 파라미터 수정만으로 다른 데이터셋을 학습할 수 있습니다.
-## 219번째 줄에서 확인할 수 있습니다.
+
+## This pipeline template can demonstrate an object detection model using YOLOv3.
+## Requires train and validation datasets in tfrecord format.
+## We also need a comprehensive image of the pretrained weights and tests.
+## Finally, enter class information, image size, and epochs.
+## Receiving the above information as a pipe [yolov3_pipeline] will be possible someday.
+## You can see it in line 219.
 
 def load_test_data(img_url: str, input_img: OutputPath('jpg')):
     import gdown
