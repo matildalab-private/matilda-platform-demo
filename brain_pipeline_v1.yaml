@@ -2,27 +2,26 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   generateName: yolov3-pipeline-
-  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.13, pipelines.kubeflow.org/pipeline_compilation_time: '2023-01-30T16:09:44.803496',
-    pipelines.kubeflow.org/pipeline_spec: '{"inputs": [{"default": "pcb defect dataset",
-      "name": "dataset_name", "optional": true}, {"default": "https://drive.google.com/file/d/1qn0mLFV7NBbmw6-ZTuF_tN_oJxRHx-XR/view?usp=sharing",
-      "name": "train_dataset_url", "optional": true}, {"default": "https://drive.google.com/file/d/1gUCWhls3ZyVurdYFl1iikRUlDHmKi4ZQ/view?usp=sharing",
-      "name": "val_dataset_url", "optional": true}, {"default": "https://drive.google.com/drive/folders/1btey4JhgBRkoJneGKkvBLTDAuOMfPNmV?usp=share_link",
-      "name": "checkpoint_url", "optional": true}, {"default": "yolov3_train_30.tf",
-      "name": "checkpoint_name", "optional": true}, {"default": "https://drive.google.com/file/d/13SNqfX3z8N1-qt4PwaS4RL0O2SydN09j/view?usp=sharing",
-      "name": "test_img_url", "optional": true}, {"default": "416", "name": "model_size",
-      "optional": true}, {"default": "6", "name": "num_classes", "optional": true},
-      {"default": "1", "name": "num_epochs", "optional": true}, {"default": "[\"missing_hole\",
-      \"mouse_bite\", \"open_circuit\", \"short\", \"spur\", \"spurious_copper\"]",
-      "name": "class_names", "optional": true}], "name": "YOLOv3 pipeline"}'}
-  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.13}
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.18, pipelines.kubeflow.org/pipeline_compilation_time: '2023-01-28T13:02:56.987504',
+    pipelines.kubeflow.org/pipeline_spec: '{"inputs": [{"default": "brain tumor dataset",
+      "name": "dataset_name", "optional": true}, {"default": "https://drive.google.com/file/d/1Sq0bph5QJE5U_x-qu8hUcjgiTONeBDy1/view?usp=sharing",
+      "name": "train_dataset_url", "optional": true}, {"default": "https://drive.google.com/file/d/172vMkaGKkol2x1juNzjWdEwNZrTyZnvz/view?usp=share_link",
+      "name": "val_dataset_url", "optional": true}, {"default": "https://drive.google.com/drive/folders/1-C3N6h-CtdojHjEyFvXGXBorDFBo_k4z?usp=share_link",
+      "name": "checkpoint_url", "optional": true}, {"default": "axial_ckpt.tf", "name":
+      "checkpoint_name", "optional": true}, {"default": "https://drive.google.com/file/d/13PzBr8jBjHdt4VMaEcEOkMoCF6VKpmx1/view?usp=share_link",
+      "name": "test_img_url", "optional": true}, {"default": "256", "name": "model_size",
+      "optional": true}, {"default": "2", "name": "num_classes", "optional": true},
+      {"default": "1", "name": "num_epochs", "optional": true}, {"default": "[\"negative\",
+      \"positive\"]", "name": "class_names", "optional": true}], "name": "YOLOv3 pipeline"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.8.18}
 spec:
   entrypoint: yolov3-pipeline
   templates:
   - name: augment-data
     container:
-      args: [--train-dataset-url, '{{inputs.parameters.load-train-brain-data-text1}}',
-        --val-dataset-url, '{{inputs.parameters.load-train-brain-data-text2}}', '----output-paths',
-        /tmp/outputs/text1/data, /tmp/outputs/text2/data]
+      args: [--train-dataset-url, '{{inputs.parameters.load-train-data-text1}}', --val-dataset-url,
+        '{{inputs.parameters.load-train-data-text2}}', '----output-paths', /tmp/outputs/text1/data,
+        /tmp/outputs/text2/data]
       command:
       - sh
       - -ec
@@ -31,26 +30,27 @@ spec:
         printf "%s" "$0" > "$program_path"
         python3 -u "$program_path" "$@"
       - "def augment_data(\n    train_dataset_url, \n    val_dataset_url\n):\n   \
-        \ print(f'data augmentation completed!')\n    return (train_dataset_url, val_dataset_url)\n\
-        \ndef _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value,\
-        \ str):\n        raise TypeError('Value \"{}\" has type \"{}\" instead of\
-        \ str.'.format(\n            str(str_value), str(type(str_value))))\n    return\
-        \ str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog='Augment\
-        \ data', description='')\n_parser.add_argument(\"--train-dataset-url\", dest=\"\
-        train_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n\
-        _parser.add_argument(\"--val-dataset-url\", dest=\"val_dataset_url\", type=str,\
-        \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\"\
-        , dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args = vars(_parser.parse_args())\n\
-        _output_files = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = augment_data(**_parsed_args)\n\
-        \n_output_serializers = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\
-        \nimport os\nfor idx, output_file in enumerate(_output_files):\n    try:\n\
-        \        os.makedirs(os.path.dirname(output_file))\n    except OSError:\n\
-        \        pass\n    with open(output_file, 'w') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"
+        \ from time import sleep\n    sleep(30)\n    print(f'data augmentation completed!')\n\
+        \    return (train_dataset_url, val_dataset_url)\n\ndef _serialize_str(str_value:\
+        \ str) -> str:\n    if not isinstance(str_value, str):\n        raise TypeError('Value\
+        \ \"{}\" has type \"{}\" instead of str.'.format(\n            str(str_value),\
+        \ str(type(str_value))))\n    return str_value\n\nimport argparse\n_parser\
+        \ = argparse.ArgumentParser(prog='Augment data', description='')\n_parser.add_argument(\"\
+        --train-dataset-url\", dest=\"train_dataset_url\", type=str, required=True,\
+        \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-url\",\
+        \ dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n\
+        _parser.add_argument(\"----output-paths\", dest=\"_output_paths\", type=str,\
+        \ nargs=2)\n_parsed_args = vars(_parser.parse_args())\n_output_files = _parsed_args.pop(\"\
+        _output_paths\", [])\n\n_outputs = augment_data(**_parsed_args)\n\n_output_serializers\
+        \ = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,\
+        \ output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n\
+        \    except OSError:\n        pass\n    with open(output_file, 'w') as f:\n\
+        \        f.write(_output_serializers[idx](_outputs[idx]))\n"
       image: python:3.7
     inputs:
       parameters:
-      - {name: load-train-brain-data-text1}
-      - {name: load-train-brain-data-text2}
+      - {name: load-train-data-text1}
+      - {name: load-train-data-text2}
     outputs:
       parameters:
       - name: augment-data-text1
@@ -62,7 +62,7 @@ spec:
       - {name: augment-data-text2, path: /tmp/outputs/text2/data}
     metadata:
       labels:
-        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
         pipelines.kubeflow.org/pipeline-sdk-type: kfp
         pipelines.kubeflow.org/enable_caching: "true"
       annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
@@ -70,13 +70,13 @@ spec:
           {"inputValue": "val_dataset_url"}, "----output-paths", {"outputPath": "text1"},
           {"outputPath": "text2"}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf
           \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
-          "def augment_data(\n    train_dataset_url, \n    val_dataset_url\n):\n    print(f''data
-          augmentation completed!'')\n    return (train_dataset_url, val_dataset_url)\n\ndef
-          _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value,
-          str):\n        raise TypeError(''Value \"{}\" has type \"{}\" instead of
-          str.''.format(\n            str(str_value), str(type(str_value))))\n    return
-          str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Augment
-          data'', description='''')\n_parser.add_argument(\"--train-dataset-url\",
+          "def augment_data(\n    train_dataset_url, \n    val_dataset_url\n):\n    from
+          time import sleep\n    sleep(30)\n    print(f''data augmentation completed!'')\n    return
+          (train_dataset_url, val_dataset_url)\n\ndef _serialize_str(str_value: str)
+          -> str:\n    if not isinstance(str_value, str):\n        raise TypeError(''Value
+          \"{}\" has type \"{}\" instead of str.''.format(\n            str(str_value),
+          str(type(str_value))))\n    return str_value\n\nimport argparse\n_parser
+          = argparse.ArgumentParser(prog=''Augment data'', description='''')\n_parser.add_argument(\"--train-dataset-url\",
           dest=\"train_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-url\",
           dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
           dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args = vars(_parser.parse_args())\n_output_files
@@ -88,8 +88,7 @@ spec:
           "String"}, {"name": "val_dataset_url", "type": "String"}], "name": "Augment
           data", "outputs": [{"name": "text1", "type": "String"}, {"name": "text2",
           "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"train_dataset_url":
-          "{{inputs.parameters.load-train-brain-data-text1}}", "val_dataset_url":
-          "{{inputs.parameters.load-train-brain-data-text2}}"}'}
+          "{{inputs.parameters.load-train-data-text1}}", "val_dataset_url": "{{inputs.parameters.load-train-data-text2}}"}'}
   - name: evaluate-model
     container:
       args: [--model-size, '{{inputs.parameters.model_size}}', --num-classes, '{{inputs.parameters.num_classes}}',
@@ -164,14 +163,14 @@ spec:
       - {name: model_size}
       - {name: num_classes}
       artifacts:
-      - {name: load-test-brain-data-input_img, path: /tmp/inputs/input_img/data}
+      - {name: load-test-data-input_img, path: /tmp/inputs/input_img/data}
       - {name: train-model-trained_weights, path: /tmp/inputs/trained_weights/data}
     outputs:
       artifacts:
       - {name: evaluate-model-output_img, path: /tmp/outputs/output_img/data}
     metadata:
       labels:
-        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
         pipelines.kubeflow.org/pipeline-sdk-type: kfp
         pipelines.kubeflow.org/enable_caching: "true"
       annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
@@ -211,157 +210,7 @@ spec:
         pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"class_names":
           "{{inputs.parameters.class_names}}", "model_size": "{{inputs.parameters.model_size}}",
           "num_classes": "{{inputs.parameters.num_classes}}"}'}
-  - name: load-test-brain-data
-    container:
-      args: [--img-url, '{{inputs.parameters.test_img_url}}', --input-img, /tmp/outputs/input_img/data]
-      command:
-      - sh
-      - -c
-      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
-        'gdown' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
-        --no-warn-script-location 'gdown' --user) && "$0" "$@"
-      - sh
-      - -ec
-      - |
-        program_path=$(mktemp)
-        printf "%s" "$0" > "$program_path"
-        python3 -u "$program_path" "$@"
-      - |
-        def _make_parent_dirs_and_return_path(file_path: str):
-            import os
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            return file_path
-
-        def load_test_brain_data(img_url, input_img):
-            import gdown
-            gdown.download(img_url, output=input_img, quiet=True, fuzzy=True)
-            print(f'download complete!')
-
-        import argparse
-        _parser = argparse.ArgumentParser(prog='Load test brain data', description='')
-        _parser.add_argument("--img-url", dest="img_url", type=str, required=True, default=argparse.SUPPRESS)
-        _parser.add_argument("--input-img", dest="input_img", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
-        _parsed_args = vars(_parser.parse_args())
-
-        _outputs = load_test_brain_data(**_parsed_args)
-      image: python:3.7
-    inputs:
-      parameters:
-      - {name: test_img_url}
-    outputs:
-      artifacts:
-      - {name: load-test-brain-data-input_img, path: /tmp/outputs/input_img/data}
-    metadata:
-      labels:
-        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
-        pipelines.kubeflow.org/pipeline-sdk-type: kfp
-        pipelines.kubeflow.org/enable_caching: "true"
-      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
-          {"args": ["--img-url", {"inputValue": "img_url"}, "--input-img", {"outputPath":
-          "input_img"}], "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1
-          python3 -m pip install --quiet --no-warn-script-location ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1
-          python3 -m pip install --quiet --no-warn-script-location ''gdown'' --user)
-          && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
-          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
-          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
-          file_path\n\ndef load_test_brain_data(img_url, input_img):\n    import gdown\n    gdown.download(img_url,
-          output=input_img, quiet=True, fuzzy=True)\n    print(f''download complete!'')\n\nimport
-          argparse\n_parser = argparse.ArgumentParser(prog=''Load test brain data'',
-          description='''')\n_parser.add_argument(\"--img-url\", dest=\"img_url\",
-          type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--input-img\",
-          dest=\"input_img\", type=_make_parent_dirs_and_return_path, required=True,
-          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
-          = load_test_brain_data(**_parsed_args)\n"], "image": "python:3.7"}}, "inputs":
-          [{"name": "img_url", "type": "String"}], "name": "Load test brain data",
-          "outputs": [{"name": "input_img", "type": "jpg"}]}', pipelines.kubeflow.org/component_ref: '{}',
-        pipelines.kubeflow.org/arguments.parameters: '{"img_url": "{{inputs.parameters.test_img_url}}"}'}
-  - name: load-train-brain-data
-    container:
-      args: [--dataset-name, '{{inputs.parameters.dataset_name}}', --train-dataset-url,
-        '{{inputs.parameters.train_dataset_url}}', --val-dataset-url, '{{inputs.parameters.val_dataset_url}}',
-        '----output-paths', /tmp/outputs/text1/data, /tmp/outputs/text2/data]
-      command:
-      - sh
-      - -c
-      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
-        'gdown' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
-        --no-warn-script-location 'gdown' --user) && "$0" "$@"
-      - sh
-      - -ec
-      - |
-        program_path=$(mktemp)
-        printf "%s" "$0" > "$program_path"
-        python3 -u "$program_path" "$@"
-      - "def load_train_brain_data(\n    dataset_name,\n    train_dataset_url, \n\
-        \    val_dataset_url\n):\n    print(f'{dataset_name} download start ...')\n\
-        \    print(f'download completed!')\n    return(train_dataset_url, val_dataset_url)\n\
-        \ndef _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value,\
-        \ str):\n        raise TypeError('Value \"{}\" has type \"{}\" instead of\
-        \ str.'.format(\n            str(str_value), str(type(str_value))))\n    return\
-        \ str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog='Load\
-        \ train brain data', description='')\n_parser.add_argument(\"--dataset-name\"\
-        , dest=\"dataset_name\", type=str, required=True, default=argparse.SUPPRESS)\n\
-        _parser.add_argument(\"--train-dataset-url\", dest=\"train_dataset_url\",\
-        \ type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
-        --val-dataset-url\", dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n\
-        _parser.add_argument(\"----output-paths\", dest=\"_output_paths\", type=str,\
-        \ nargs=2)\n_parsed_args = vars(_parser.parse_args())\n_output_files = _parsed_args.pop(\"\
-        _output_paths\", [])\n\n_outputs = load_train_brain_data(**_parsed_args)\n\
-        \n_output_serializers = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\
-        \nimport os\nfor idx, output_file in enumerate(_output_files):\n    try:\n\
-        \        os.makedirs(os.path.dirname(output_file))\n    except OSError:\n\
-        \        pass\n    with open(output_file, 'w') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"
-      image: python:3.7
-    inputs:
-      parameters:
-      - {name: dataset_name}
-      - {name: train_dataset_url}
-      - {name: val_dataset_url}
-    outputs:
-      parameters:
-      - name: load-train-brain-data-text1
-        valueFrom: {path: /tmp/outputs/text1/data}
-      - name: load-train-brain-data-text2
-        valueFrom: {path: /tmp/outputs/text2/data}
-      artifacts:
-      - {name: load-train-brain-data-text1, path: /tmp/outputs/text1/data}
-      - {name: load-train-brain-data-text2, path: /tmp/outputs/text2/data}
-    metadata:
-      labels:
-        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
-        pipelines.kubeflow.org/pipeline-sdk-type: kfp
-        pipelines.kubeflow.org/enable_caching: "true"
-      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
-          {"args": ["--dataset-name", {"inputValue": "dataset_name"}, "--train-dataset-url",
-          {"inputValue": "train_dataset_url"}, "--val-dataset-url", {"inputValue":
-          "val_dataset_url"}, "----output-paths", {"outputPath": "text1"}, {"outputPath":
-          "text2"}], "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3
-          -m pip install --quiet --no-warn-script-location ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1
-          python3 -m pip install --quiet --no-warn-script-location ''gdown'' --user)
-          && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
-          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def load_train_brain_data(\n    dataset_name,\n    train_dataset_url,
-          \n    val_dataset_url\n):\n    print(f''{dataset_name} download start ...'')\n    print(f''download
-          completed!'')\n    return(train_dataset_url, val_dataset_url)\n\ndef _serialize_str(str_value:
-          str) -> str:\n    if not isinstance(str_value, str):\n        raise TypeError(''Value
-          \"{}\" has type \"{}\" instead of str.''.format(\n            str(str_value),
-          str(type(str_value))))\n    return str_value\n\nimport argparse\n_parser
-          = argparse.ArgumentParser(prog=''Load train brain data'', description='''')\n_parser.add_argument(\"--dataset-name\",
-          dest=\"dataset_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--train-dataset-url\",
-          dest=\"train_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-url\",
-          dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
-          dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args = vars(_parser.parse_args())\n_output_files
-          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = load_train_brain_data(**_parsed_args)\n\n_output_serializers
-          = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,
-          output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
-          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
-          "image": "python:3.7"}}, "inputs": [{"name": "dataset_name", "type": "String"},
-          {"name": "train_dataset_url", "type": "String"}, {"name": "val_dataset_url",
-          "type": "String"}], "name": "Load train brain data", "outputs": [{"name":
-          "text1", "type": "String"}, {"name": "text2", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}',
-        pipelines.kubeflow.org/arguments.parameters: '{"dataset_name": "{{inputs.parameters.dataset_name}}",
-          "train_dataset_url": "{{inputs.parameters.train_dataset_url}}", "val_dataset_url":
-          "{{inputs.parameters.val_dataset_url}}"}'}
-  - name: load-yolov3-pretrained-weights
+  - name: load-pretrained-weights
     container:
       args: [--checkpoint-url, '{{inputs.parameters.checkpoint_url}}', --pretrained-weights,
         /tmp/outputs/pretrained_weights/data]
@@ -383,28 +232,28 @@ spec:
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             return file_path
 
-        def load_YOLOv3_pretrained_weights(checkpoint_url, pretrained_weights):
+        def load_pretrained_weights(checkpoint_url, pretrained_weights):
             import gdown
             gdown.download_folder(checkpoint_url, output=pretrained_weights, quiet=True, use_cookies=False)
             print(f'download complete!')
 
         import argparse
-        _parser = argparse.ArgumentParser(prog='Load YOLOv3 pretrained weights', description='')
+        _parser = argparse.ArgumentParser(prog='Load pretrained weights', description='')
         _parser.add_argument("--checkpoint-url", dest="checkpoint_url", type=str, required=True, default=argparse.SUPPRESS)
         _parser.add_argument("--pretrained-weights", dest="pretrained_weights", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
         _parsed_args = vars(_parser.parse_args())
 
-        _outputs = load_YOLOv3_pretrained_weights(**_parsed_args)
+        _outputs = load_pretrained_weights(**_parsed_args)
       image: python:3.7
     inputs:
       parameters:
       - {name: checkpoint_url}
     outputs:
       artifacts:
-      - {name: load-yolov3-pretrained-weights-pretrained_weights, path: /tmp/outputs/pretrained_weights/data}
+      - {name: load-pretrained-weights-pretrained_weights, path: /tmp/outputs/pretrained_weights/data}
     metadata:
       labels:
-        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
         pipelines.kubeflow.org/pipeline-sdk-type: kfp
         pipelines.kubeflow.org/enable_caching: "true"
       annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
@@ -415,24 +264,174 @@ spec:
           && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
           > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
           str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
-          file_path\n\ndef load_YOLOv3_pretrained_weights(checkpoint_url, pretrained_weights):\n    import
+          file_path\n\ndef load_pretrained_weights(checkpoint_url, pretrained_weights):\n    import
           gdown\n    gdown.download_folder(checkpoint_url, output=pretrained_weights,
           quiet=True, use_cookies=False)\n    print(f''download complete!'')\n\nimport
-          argparse\n_parser = argparse.ArgumentParser(prog=''Load YOLOv3 pretrained
-          weights'', description='''')\n_parser.add_argument(\"--checkpoint-url\",
-          dest=\"checkpoint_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--pretrained-weights\",
+          argparse\n_parser = argparse.ArgumentParser(prog=''Load pretrained weights'',
+          description='''')\n_parser.add_argument(\"--checkpoint-url\", dest=\"checkpoint_url\",
+          type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--pretrained-weights\",
           dest=\"pretrained_weights\", type=_make_parent_dirs_and_return_path, required=True,
           default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
-          = load_YOLOv3_pretrained_weights(**_parsed_args)\n"], "image": "python:3.7"}},
+          = load_pretrained_weights(**_parsed_args)\n"], "image": "python:3.7"}},
           "inputs": [{"name": "checkpoint_url", "type": "String"}], "name": "Load
-          YOLOv3 pretrained weights", "outputs": [{"name": "pretrained_weights", "type":
+          pretrained weights", "outputs": [{"name": "pretrained_weights", "type":
           "Weights"}]}', pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"checkpoint_url":
           "{{inputs.parameters.checkpoint_url}}"}'}
+  - name: load-test-data
+    container:
+      args: [--img-url, '{{inputs.parameters.test_img_url}}', --input-img, /tmp/outputs/input_img/data]
+      command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+        'gdown' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+        --no-warn-script-location 'gdown' --user) && "$0" "$@"
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def _make_parent_dirs_and_return_path(file_path: str):
+            import os
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            return file_path
+
+        def load_test_data(img_url, input_img):
+            import gdown
+            gdown.download(img_url, output=input_img, quiet=True, fuzzy=True)
+            print(f'download complete!')
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Load test data', description='')
+        _parser.add_argument("--img-url", dest="img_url", type=str, required=True, default=argparse.SUPPRESS)
+        _parser.add_argument("--input-img", dest="input_img", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = load_test_data(**_parsed_args)
+      image: python:3.7
+    inputs:
+      parameters:
+      - {name: test_img_url}
+    outputs:
+      artifacts:
+      - {name: load-test-data-input_img, path: /tmp/outputs/input_img/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--img-url", {"inputValue": "img_url"}, "--input-img", {"outputPath":
+          "input_img"}], "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''gdown'' --user)
+          && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
+          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
+          str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
+          file_path\n\ndef load_test_data(img_url, input_img):\n    import gdown\n    gdown.download(img_url,
+          output=input_img, quiet=True, fuzzy=True)\n    print(f''download complete!'')\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Load test data'', description='''')\n_parser.add_argument(\"--img-url\",
+          dest=\"img_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--input-img\",
+          dest=\"input_img\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
+          = load_test_data(**_parsed_args)\n"], "image": "python:3.7"}}, "inputs":
+          [{"name": "img_url", "type": "String"}], "name": "Load test data", "outputs":
+          [{"name": "input_img", "type": "jpg"}]}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"img_url": "{{inputs.parameters.test_img_url}}"}'}
+  - name: load-train-data
+    container:
+      args: [--dataset-name, '{{inputs.parameters.dataset_name}}', --train-dataset-url,
+        '{{inputs.parameters.train_dataset_url}}', --val-dataset-url, '{{inputs.parameters.val_dataset_url}}',
+        '----output-paths', /tmp/outputs/text1/data, /tmp/outputs/text2/data]
+      command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+        'gdown' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+        --no-warn-script-location 'gdown' --user) && "$0" "$@"
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - "def load_train_data(\n    dataset_name,\n    train_dataset_url, \n    val_dataset_url\n\
+        ):\n    from time import sleep\n    print(f'{dataset_name} download start\
+        \ ...')\n    sleep(30)\n    print(f'download completed!')\n    return(train_dataset_url,\
+        \ val_dataset_url)\n\ndef _serialize_str(str_value: str) -> str:\n    if not\
+        \ isinstance(str_value, str):\n        raise TypeError('Value \"{}\" has type\
+        \ \"{}\" instead of str.'.format(\n            str(str_value), str(type(str_value))))\n\
+        \    return str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog='Load\
+        \ train data', description='')\n_parser.add_argument(\"--dataset-name\", dest=\"\
+        dataset_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+        --train-dataset-url\", dest=\"train_dataset_url\", type=str, required=True,\
+        \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-url\",\
+        \ dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n\
+        _parser.add_argument(\"----output-paths\", dest=\"_output_paths\", type=str,\
+        \ nargs=2)\n_parsed_args = vars(_parser.parse_args())\n_output_files = _parsed_args.pop(\"\
+        _output_paths\", [])\n\n_outputs = load_train_data(**_parsed_args)\n\n_output_serializers\
+        \ = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,\
+        \ output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n\
+        \    except OSError:\n        pass\n    with open(output_file, 'w') as f:\n\
+        \        f.write(_output_serializers[idx](_outputs[idx]))\n"
+      image: python:3.7
+    inputs:
+      parameters:
+      - {name: dataset_name}
+      - {name: train_dataset_url}
+      - {name: val_dataset_url}
+    outputs:
+      parameters:
+      - name: load-train-data-text1
+        valueFrom: {path: /tmp/outputs/text1/data}
+      - name: load-train-data-text2
+        valueFrom: {path: /tmp/outputs/text2/data}
+      artifacts:
+      - {name: load-train-data-text1, path: /tmp/outputs/text1/data}
+      - {name: load-train-data-text2, path: /tmp/outputs/text2/data}
+    metadata:
+      labels:
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
+        pipelines.kubeflow.org/pipeline-sdk-type: kfp
+        pipelines.kubeflow.org/enable_caching: "true"
+      annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
+          {"args": ["--dataset-name", {"inputValue": "dataset_name"}, "--train-dataset-url",
+          {"inputValue": "train_dataset_url"}, "--val-dataset-url", {"inputValue":
+          "val_dataset_url"}, "----output-paths", {"outputPath": "text1"}, {"outputPath":
+          "text2"}], "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3
+          -m pip install --quiet --no-warn-script-location ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1
+          python3 -m pip install --quiet --no-warn-script-location ''gdown'' --user)
+          && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
+          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def load_train_data(\n    dataset_name,\n    train_dataset_url,
+          \n    val_dataset_url\n):\n    from time import sleep\n    print(f''{dataset_name}
+          download start ...'')\n    sleep(30)\n    print(f''download completed!'')\n    return(train_dataset_url,
+          val_dataset_url)\n\ndef _serialize_str(str_value: str) -> str:\n    if not
+          isinstance(str_value, str):\n        raise TypeError(''Value \"{}\" has
+          type \"{}\" instead of str.''.format(\n            str(str_value), str(type(str_value))))\n    return
+          str_value\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Load
+          train data'', description='''')\n_parser.add_argument(\"--dataset-name\",
+          dest=\"dataset_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--train-dataset-url\",
+          dest=\"train_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-url\",
+          dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\",
+          dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args = vars(_parser.parse_args())\n_output_files
+          = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = load_train_data(**_parsed_args)\n\n_output_serializers
+          = [\n    _serialize_str,\n    _serialize_str,\n\n]\n\nimport os\nfor idx,
+          output_file in enumerate(_output_files):\n    try:\n        os.makedirs(os.path.dirname(output_file))\n    except
+          OSError:\n        pass\n    with open(output_file, ''w'') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "dataset_name", "type": "String"},
+          {"name": "train_dataset_url", "type": "String"}, {"name": "val_dataset_url",
+          "type": "String"}], "name": "Load train data", "outputs": [{"name": "text1",
+          "type": "String"}, {"name": "text2", "type": "String"}]}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"dataset_name": "{{inputs.parameters.dataset_name}}",
+          "train_dataset_url": "{{inputs.parameters.train_dataset_url}}", "val_dataset_url":
+          "{{inputs.parameters.val_dataset_url}}"}'}
   - name: preprocess-data
     container:
       args: [--train-dataset-url, '{{inputs.parameters.augment-data-text1}}', --val-dataset-url,
-        '{{inputs.parameters.augment-data-text2}}', --train-dataset-pcb, /tmp/outputs/train_dataset_pcb/data,
-        --val-dataset-pcb, /tmp/outputs/val_dataset_pcb/data]
+        '{{inputs.parameters.augment-data-text2}}', --train-dataset, /tmp/outputs/train_dataset/data,
+        --val-dataset, /tmp/outputs/val_dataset/data]
       command:
       - sh
       - -c
@@ -448,17 +447,16 @@ spec:
       - "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n \
         \   os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return file_path\n\
         \ndef preprocess_data(\n    train_dataset_url, \n    val_dataset_url, \n \
-        \   train_dataset_pcb, \n    val_dataset_pcb\n):\n    import gdown\n    gdown.download(train_dataset_url,\
-        \ output=train_dataset_pcb, quiet=True, fuzzy=True)\n    gdown.download(val_dataset_url,\
-        \ output=val_dataset_pcb, quiet=True, fuzzy=True)\n    print(f'preprocess\
-        \ complete!')\n\nimport argparse\n_parser = argparse.ArgumentParser(prog='Preprocess\
-        \ data', description='')\n_parser.add_argument(\"--train-dataset-url\", dest=\"\
-        train_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n\
-        _parser.add_argument(\"--val-dataset-url\", dest=\"val_dataset_url\", type=str,\
-        \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--train-dataset-pcb\"\
-        , dest=\"train_dataset_pcb\", type=_make_parent_dirs_and_return_path, required=True,\
-        \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-pcb\",\
-        \ dest=\"val_dataset_pcb\", type=_make_parent_dirs_and_return_path, required=True,\
+        \   train_dataset, \n    val_dataset\n):\n    import gdown\n    gdown.download(train_dataset_url,\
+        \ output=train_dataset, quiet=True, fuzzy=True)\n    gdown.download(val_dataset_url,\
+        \ output=val_dataset, quiet=True, fuzzy=True)\n    print(f'preprocess complete!')\n\
+        \nimport argparse\n_parser = argparse.ArgumentParser(prog='Preprocess data',\
+        \ description='')\n_parser.add_argument(\"--train-dataset-url\", dest=\"train_dataset_url\"\
+        , type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+        --val-dataset-url\", dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n\
+        _parser.add_argument(\"--train-dataset\", dest=\"train_dataset\", type=_make_parent_dirs_and_return_path,\
+        \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset\"\
+        , dest=\"val_dataset\", type=_make_parent_dirs_and_return_path, required=True,\
         \ default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n\
         _outputs = preprocess_data(**_parsed_args)\n"
       image: python:3.7
@@ -468,39 +466,38 @@ spec:
       - {name: augment-data-text2}
     outputs:
       artifacts:
-      - {name: preprocess-data-train_dataset_pcb, path: /tmp/outputs/train_dataset_pcb/data}
-      - {name: preprocess-data-val_dataset_pcb, path: /tmp/outputs/val_dataset_pcb/data}
+      - {name: preprocess-data-train_dataset, path: /tmp/outputs/train_dataset/data}
+      - {name: preprocess-data-val_dataset, path: /tmp/outputs/val_dataset/data}
     metadata:
       labels:
-        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
         pipelines.kubeflow.org/pipeline-sdk-type: kfp
         pipelines.kubeflow.org/enable_caching: "true"
       annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
           {"args": ["--train-dataset-url", {"inputValue": "train_dataset_url"}, "--val-dataset-url",
-          {"inputValue": "val_dataset_url"}, "--train-dataset-pcb", {"outputPath":
-          "train_dataset_pcb"}, "--val-dataset-pcb", {"outputPath": "val_dataset_pcb"}],
-          "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip
-          install --quiet --no-warn-script-location ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1
-          python3 -m pip install --quiet --no-warn-script-location ''gdown'' --user)
-          && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\"
-          > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
+          {"inputValue": "val_dataset_url"}, "--train-dataset", {"outputPath": "train_dataset"},
+          "--val-dataset", {"outputPath": "val_dataset"}], "command": ["sh", "-c",
+          "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location
+          ''gdown'' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet
+          --no-warn-script-location ''gdown'' --user) && \"$0\" \"$@\"", "sh", "-ec",
+          "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def _make_parent_dirs_and_return_path(file_path:
           str):\n    import os\n    os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return
           file_path\n\ndef preprocess_data(\n    train_dataset_url, \n    val_dataset_url,
-          \n    train_dataset_pcb, \n    val_dataset_pcb\n):\n    import gdown\n    gdown.download(train_dataset_url,
-          output=train_dataset_pcb, quiet=True, fuzzy=True)\n    gdown.download(val_dataset_url,
-          output=val_dataset_pcb, quiet=True, fuzzy=True)\n    print(f''preprocess
-          complete!'')\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Preprocess
-          data'', description='''')\n_parser.add_argument(\"--train-dataset-url\",
+          \n    train_dataset, \n    val_dataset\n):\n    import gdown\n    gdown.download(train_dataset_url,
+          output=train_dataset, quiet=True, fuzzy=True)\n    gdown.download(val_dataset_url,
+          output=val_dataset, quiet=True, fuzzy=True)\n    print(f''preprocess complete!'')\n\nimport
+          argparse\n_parser = argparse.ArgumentParser(prog=''Preprocess data'', description='''')\n_parser.add_argument(\"--train-dataset-url\",
           dest=\"train_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-url\",
-          dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--train-dataset-pcb\",
-          dest=\"train_dataset_pcb\", type=_make_parent_dirs_and_return_path, required=True,
-          default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-pcb\",
-          dest=\"val_dataset_pcb\", type=_make_parent_dirs_and_return_path, required=True,
-          default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
-          = preprocess_data(**_parsed_args)\n"], "image": "python:3.7"}}, "inputs":
-          [{"name": "train_dataset_url", "type": "String"}, {"name": "val_dataset_url",
-          "type": "String"}], "name": "Preprocess data", "outputs": [{"name": "train_dataset_pcb",
-          "type": "Dataset"}, {"name": "val_dataset_pcb", "type": "Dataset"}]}', pipelines.kubeflow.org/component_ref: '{}',
+          dest=\"val_dataset_url\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--train-dataset\",
+          dest=\"train_dataset\", type=_make_parent_dirs_and_return_path, required=True,
+          default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset\", dest=\"val_dataset\",
+          type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = preprocess_data(**_parsed_args)\n"],
+          "image": "python:3.7"}}, "inputs": [{"name": "train_dataset_url", "type":
+          "String"}, {"name": "val_dataset_url", "type": "String"}], "name": "Preprocess
+          data", "outputs": [{"name": "train_dataset", "type": "Dataset"}, {"name":
+          "val_dataset", "type": "Dataset"}]}', pipelines.kubeflow.org/component_ref: '{}',
         pipelines.kubeflow.org/arguments.parameters: '{"train_dataset_url": "{{inputs.parameters.augment-data-text1}}",
           "val_dataset_url": "{{inputs.parameters.augment-data-text2}}"}'}
   - name: save-model
@@ -532,7 +529,7 @@ spec:
       - {name: evaluate-model-output_img, path: /tmp/inputs/temp_var/data}
     metadata:
       labels:
-        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
         pipelines.kubeflow.org/pipeline-sdk-type: kfp
         pipelines.kubeflow.org/enable_caching: "true"
       annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
@@ -574,7 +571,7 @@ spec:
       - {name: evaluate-model-output_img, path: /tmp/inputs/temp_var/data}
     metadata:
       labels:
-        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
         pipelines.kubeflow.org/pipeline-sdk-type: kfp
         pipelines.kubeflow.org/enable_caching: "true"
       annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
@@ -592,8 +589,8 @@ spec:
       args: [--model-size, '{{inputs.parameters.model_size}}', --num-classes, '{{inputs.parameters.num_classes}}',
         --num-epohcs, '{{inputs.parameters.num_epochs}}', --class-names, '{{inputs.parameters.class_names}}',
         --checkpoint-name, '{{inputs.parameters.checkpoint_name}}', --pretrained-weights,
-        /tmp/inputs/pretrained_weights/data, --train-dataset-pcb, /tmp/inputs/train_dataset_pcb/data,
-        --val-dataset-pcb, /tmp/inputs/val_dataset_pcb/data, --trained-weights, /tmp/outputs/trained_weights/data]
+        /tmp/inputs/pretrained_weights/data, --train-dataset, /tmp/inputs/train_dataset/data,
+        --val-dataset, /tmp/inputs/val_dataset/data, --trained-weights, /tmp/outputs/trained_weights/data]
       command:
       - sh
       - -c
@@ -609,8 +606,8 @@ spec:
       - "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n \
         \   os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return file_path\n\
         \ndef train_model(\n    model_size,\n    num_classes,\n    num_epohcs,\n \
-        \   class_names,\n    checkpoint_name,\n    pretrained_weights,\n    train_dataset_pcb,\n\
-        \    val_dataset_pcb,\n    trained_weights\n):\n    from yolov3_minimal import\
+        \   class_names,\n    checkpoint_name,\n    pretrained_weights,\n    train_dataset,\n\
+        \    val_dataset,\n    trained_weights\n):\n    from yolov3_minimal import\
         \ load_tfrecord_dataset, transform_images, transform_targets, YoloV3, YoloLoss,\
         \ freeze_all\n    import numpy as np\n    import tensorflow as tf\n    from\
         \ tensorflow.keras.callbacks import (\n        ReduceLROnPlateau,\n      \
@@ -619,12 +616,12 @@ spec:
         \ = 1e-3\n\n    anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61),\
         \ (62, 45),(59, 119), (116, 90), (156, 198), (373, 326)],np.float32) / 416\n\
         \    anchor_masks = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])\n\n    train_dataset\
-        \ = load_tfrecord_dataset(train_dataset_pcb, class_names, SIZE)\n    train_dataset\
+        \ = load_tfrecord_dataset(train_dataset, class_names, SIZE)\n    train_dataset\
         \ = train_dataset.shuffle(buffer_size=512)\n    train_dataset = train_dataset.batch(8)\n\
         \    train_dataset = train_dataset.map(lambda x, y: (\n        transform_images(x,\
         \ SIZE),\n        transform_targets(y, anchors, anchor_masks, SIZE)))\n  \
         \  train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\
-        \n    val_dataset = load_tfrecord_dataset(val_dataset_pcb, class_names, SIZE)\n\
+        \n    val_dataset = load_tfrecord_dataset(val_dataset, class_names, SIZE)\n\
         \    val_dataset = val_dataset.batch(8)\n    val_dataset = val_dataset.map(lambda\
         \ x, y: (\n        transform_images(x, SIZE),\n        transform_targets(y,\
         \ anchors, anchor_masks, SIZE)))\n    val_dataset = val_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\
@@ -648,9 +645,9 @@ spec:
         _parser.add_argument(\"--checkpoint-name\", dest=\"checkpoint_name\", type=str,\
         \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--pretrained-weights\"\
         , dest=\"pretrained_weights\", type=str, required=True, default=argparse.SUPPRESS)\n\
-        _parser.add_argument(\"--train-dataset-pcb\", dest=\"train_dataset_pcb\",\
-        \ type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
-        --val-dataset-pcb\", dest=\"val_dataset_pcb\", type=str, required=True, default=argparse.SUPPRESS)\n\
+        _parser.add_argument(\"--train-dataset\", dest=\"train_dataset\", type=str,\
+        \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset\"\
+        , dest=\"val_dataset\", type=str, required=True, default=argparse.SUPPRESS)\n\
         _parser.add_argument(\"--trained-weights\", dest=\"trained_weights\", type=_make_parent_dirs_and_return_path,\
         \ required=True, default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\
         \n_outputs = train_model(**_parsed_args)\n"
@@ -663,15 +660,15 @@ spec:
       - {name: num_classes}
       - {name: num_epochs}
       artifacts:
-      - {name: load-yolov3-pretrained-weights-pretrained_weights, path: /tmp/inputs/pretrained_weights/data}
-      - {name: preprocess-data-train_dataset_pcb, path: /tmp/inputs/train_dataset_pcb/data}
-      - {name: preprocess-data-val_dataset_pcb, path: /tmp/inputs/val_dataset_pcb/data}
+      - {name: load-pretrained-weights-pretrained_weights, path: /tmp/inputs/pretrained_weights/data}
+      - {name: preprocess-data-train_dataset, path: /tmp/inputs/train_dataset/data}
+      - {name: preprocess-data-val_dataset, path: /tmp/inputs/val_dataset/data}
     outputs:
       artifacts:
       - {name: train-model-trained_weights, path: /tmp/outputs/trained_weights/data}
     metadata:
       labels:
-        pipelines.kubeflow.org/kfp_sdk_version: 1.8.13
+        pipelines.kubeflow.org/kfp_sdk_version: 1.8.18
         pipelines.kubeflow.org/pipeline-sdk-type: kfp
         pipelines.kubeflow.org/enable_caching: "true"
       annotations: {pipelines.kubeflow.org/component_spec: '{"implementation": {"container":
@@ -679,27 +676,27 @@ spec:
           {"inputValue": "num_classes"}, "--num-epohcs", {"inputValue": "num_epohcs"},
           "--class-names", {"inputValue": "class_names"}, "--checkpoint-name", {"inputValue":
           "checkpoint_name"}, "--pretrained-weights", {"inputPath": "pretrained_weights"},
-          "--train-dataset-pcb", {"inputPath": "train_dataset_pcb"}, "--val-dataset-pcb",
-          {"inputPath": "val_dataset_pcb"}, "--trained-weights", {"outputPath": "trained_weights"}],
+          "--train-dataset", {"inputPath": "train_dataset"}, "--val-dataset", {"inputPath":
+          "val_dataset"}, "--trained-weights", {"outputPath": "trained_weights"}],
           "command": ["sh", "-c", "(PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip
           install --quiet --no-warn-script-location ''yolov3-minimal'' || PIP_DISABLE_PIP_VERSION_CHECK=1
           python3 -m pip install --quiet --no-warn-script-location ''yolov3-minimal''
           --user) && \"$0\" \"$@\"", "sh", "-ec", "program_path=$(mktemp)\nprintf
           \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
           "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n    os.makedirs(os.path.dirname(file_path),
-          exist_ok=True)\n    return file_path\n\ndef train_model(\n    model_size,\n    num_classes,\n    num_epohcs,\n    class_names,\n    checkpoint_name,\n    pretrained_weights,\n    train_dataset_pcb,\n    val_dataset_pcb,\n    trained_weights\n):\n    from
+          exist_ok=True)\n    return file_path\n\ndef train_model(\n    model_size,\n    num_classes,\n    num_epohcs,\n    class_names,\n    checkpoint_name,\n    pretrained_weights,\n    train_dataset,\n    val_dataset,\n    trained_weights\n):\n    from
           yolov3_minimal import load_tfrecord_dataset, transform_images, transform_targets,
           YoloV3, YoloLoss, freeze_all\n    import numpy as np\n    import tensorflow
           as tf\n    from tensorflow.keras.callbacks import (\n        ReduceLROnPlateau,\n        EarlyStopping,\n        ModelCheckpoint\n    )\n\n    SIZE
           = model_size\n    NUM_CLASSES = num_classes\n    NUM_EPOCHS = num_epohcs\n    LEARNING_RATE
           = 1e-3\n\n    anchors = np.array([(10, 13), (16, 30), (33, 23), (30, 61),
           (62, 45),(59, 119), (116, 90), (156, 198), (373, 326)],np.float32) / 416\n    anchor_masks
-          = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])\n\n    train_dataset = load_tfrecord_dataset(train_dataset_pcb,
+          = np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])\n\n    train_dataset = load_tfrecord_dataset(train_dataset,
           class_names, SIZE)\n    train_dataset = train_dataset.shuffle(buffer_size=512)\n    train_dataset
           = train_dataset.batch(8)\n    train_dataset = train_dataset.map(lambda x,
           y: (\n        transform_images(x, SIZE),\n        transform_targets(y, anchors,
           anchor_masks, SIZE)))\n    train_dataset = train_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\n    val_dataset
-          = load_tfrecord_dataset(val_dataset_pcb, class_names, SIZE)\n    val_dataset
+          = load_tfrecord_dataset(val_dataset, class_names, SIZE)\n    val_dataset
           = val_dataset.batch(8)\n    val_dataset = val_dataset.map(lambda x, y: (\n        transform_images(x,
           SIZE),\n        transform_targets(y, anchors, anchor_masks, SIZE)))\n    val_dataset
           = val_dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)\n\n    model
@@ -716,22 +713,21 @@ spec:
           dest=\"num_epohcs\", type=int, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--class-names\",
           dest=\"class_names\", type=json.loads, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--checkpoint-name\",
           dest=\"checkpoint_name\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--pretrained-weights\",
-          dest=\"pretrained_weights\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--train-dataset-pcb\",
-          dest=\"train_dataset_pcb\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset-pcb\",
-          dest=\"val_dataset_pcb\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--trained-weights\",
+          dest=\"pretrained_weights\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--train-dataset\",
+          dest=\"train_dataset\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--val-dataset\",
+          dest=\"val_dataset\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--trained-weights\",
           dest=\"trained_weights\", type=_make_parent_dirs_and_return_path, required=True,
           default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n_outputs
           = train_model(**_parsed_args)\n"], "image": "python:3.7"}}, "inputs": [{"name":
           "model_size", "type": "Integer"}, {"name": "num_classes", "type": "Integer"},
           {"name": "num_epohcs", "type": "Integer"}, {"name": "class_names", "type":
           "typing.List[str]"}, {"name": "checkpoint_name", "type": "String"}, {"name":
-          "pretrained_weights", "type": "Weights"}, {"name": "train_dataset_pcb",
-          "type": "Dataset"}, {"name": "val_dataset_pcb", "type": "Dataset"}], "name":
-          "Train model", "outputs": [{"name": "trained_weights", "type": "Weights"}]}',
-        pipelines.kubeflow.org/component_ref: '{}', pipelines.kubeflow.org/arguments.parameters: '{"checkpoint_name":
-          "{{inputs.parameters.checkpoint_name}}", "class_names": "{{inputs.parameters.class_names}}",
-          "model_size": "{{inputs.parameters.model_size}}", "num_classes": "{{inputs.parameters.num_classes}}",
-          "num_epohcs": "{{inputs.parameters.num_epochs}}"}'}
+          "pretrained_weights", "type": "Weights"}, {"name": "train_dataset", "type":
+          "Dataset"}, {"name": "val_dataset", "type": "Dataset"}], "name": "Train
+          model", "outputs": [{"name": "trained_weights", "type": "Weights"}]}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"checkpoint_name": "{{inputs.parameters.checkpoint_name}}",
+          "class_names": "{{inputs.parameters.class_names}}", "model_size": "{{inputs.parameters.model_size}}",
+          "num_classes": "{{inputs.parameters.num_classes}}", "num_epohcs": "{{inputs.parameters.num_epochs}}"}'}
   - name: yolov3-pipeline
     inputs:
       parameters:
@@ -749,39 +745,39 @@ spec:
       tasks:
       - name: augment-data
         template: augment-data
-        dependencies: [load-train-brain-data]
+        dependencies: [load-train-data]
         arguments:
           parameters:
-          - {name: load-train-brain-data-text1, value: '{{tasks.load-train-brain-data.outputs.parameters.load-train-brain-data-text1}}'}
-          - {name: load-train-brain-data-text2, value: '{{tasks.load-train-brain-data.outputs.parameters.load-train-brain-data-text2}}'}
+          - {name: load-train-data-text1, value: '{{tasks.load-train-data.outputs.parameters.load-train-data-text1}}'}
+          - {name: load-train-data-text2, value: '{{tasks.load-train-data.outputs.parameters.load-train-data-text2}}'}
       - name: evaluate-model
         template: evaluate-model
-        dependencies: [load-test-brain-data, train-model]
+        dependencies: [load-test-data, train-model]
         arguments:
           parameters:
           - {name: class_names, value: '{{inputs.parameters.class_names}}'}
           - {name: model_size, value: '{{inputs.parameters.model_size}}'}
           - {name: num_classes, value: '{{inputs.parameters.num_classes}}'}
           artifacts:
-          - {name: load-test-brain-data-input_img, from: '{{tasks.load-test-brain-data.outputs.artifacts.load-test-brain-data-input_img}}'}
+          - {name: load-test-data-input_img, from: '{{tasks.load-test-data.outputs.artifacts.load-test-data-input_img}}'}
           - {name: train-model-trained_weights, from: '{{tasks.train-model.outputs.artifacts.train-model-trained_weights}}'}
-      - name: load-test-brain-data
-        template: load-test-brain-data
+      - name: load-pretrained-weights
+        template: load-pretrained-weights
+        arguments:
+          parameters:
+          - {name: checkpoint_url, value: '{{inputs.parameters.checkpoint_url}}'}
+      - name: load-test-data
+        template: load-test-data
         arguments:
           parameters:
           - {name: test_img_url, value: '{{inputs.parameters.test_img_url}}'}
-      - name: load-train-brain-data
-        template: load-train-brain-data
+      - name: load-train-data
+        template: load-train-data
         arguments:
           parameters:
           - {name: dataset_name, value: '{{inputs.parameters.dataset_name}}'}
           - {name: train_dataset_url, value: '{{inputs.parameters.train_dataset_url}}'}
           - {name: val_dataset_url, value: '{{inputs.parameters.val_dataset_url}}'}
-      - name: load-yolov3-pretrained-weights
-        template: load-yolov3-pretrained-weights
-        arguments:
-          parameters:
-          - {name: checkpoint_url, value: '{{inputs.parameters.checkpoint_url}}'}
       - name: preprocess-data
         template: preprocess-data
         dependencies: [augment-data]
@@ -803,7 +799,7 @@ spec:
           - {name: evaluate-model-output_img, from: '{{tasks.evaluate-model.outputs.artifacts.evaluate-model-output_img}}'}
       - name: train-model
         template: train-model
-        dependencies: [load-yolov3-pretrained-weights, preprocess-data]
+        dependencies: [load-pretrained-weights, preprocess-data]
         arguments:
           parameters:
           - {name: checkpoint_name, value: '{{inputs.parameters.checkpoint_name}}'}
@@ -812,20 +808,19 @@ spec:
           - {name: num_classes, value: '{{inputs.parameters.num_classes}}'}
           - {name: num_epochs, value: '{{inputs.parameters.num_epochs}}'}
           artifacts:
-          - {name: load-yolov3-pretrained-weights-pretrained_weights, from: '{{tasks.load-yolov3-pretrained-weights.outputs.artifacts.load-yolov3-pretrained-weights-pretrained_weights}}'}
-          - {name: preprocess-data-train_dataset_pcb, from: '{{tasks.preprocess-data.outputs.artifacts.preprocess-data-train_dataset_pcb}}'}
-          - {name: preprocess-data-val_dataset_pcb, from: '{{tasks.preprocess-data.outputs.artifacts.preprocess-data-val_dataset_pcb}}'}
+          - {name: load-pretrained-weights-pretrained_weights, from: '{{tasks.load-pretrained-weights.outputs.artifacts.load-pretrained-weights-pretrained_weights}}'}
+          - {name: preprocess-data-train_dataset, from: '{{tasks.preprocess-data.outputs.artifacts.preprocess-data-train_dataset}}'}
+          - {name: preprocess-data-val_dataset, from: '{{tasks.preprocess-data.outputs.artifacts.preprocess-data-val_dataset}}'}
   arguments:
     parameters:
-    - {name: dataset_name, value: pcb defect dataset}
-    - {name: train_dataset_url, value: 'https://drive.google.com/file/d/1qn0mLFV7NBbmw6-ZTuF_tN_oJxRHx-XR/view?usp=sharing'}
-    - {name: val_dataset_url, value: 'https://drive.google.com/file/d/1gUCWhls3ZyVurdYFl1iikRUlDHmKi4ZQ/view?usp=sharing'}
-    - {name: checkpoint_url, value: 'https://drive.google.com/drive/folders/1btey4JhgBRkoJneGKkvBLTDAuOMfPNmV?usp=share_link'}
-    - {name: checkpoint_name, value: yolov3_train_30.tf}
-    - {name: test_img_url, value: 'https://drive.google.com/file/d/13SNqfX3z8N1-qt4PwaS4RL0O2SydN09j/view?usp=sharing'}
-    - {name: model_size, value: '416'}
-    - {name: num_classes, value: '6'}
+    - {name: dataset_name, value: brain tumor dataset}
+    - {name: train_dataset_url, value: 'https://drive.google.com/file/d/1Sq0bph5QJE5U_x-qu8hUcjgiTONeBDy1/view?usp=sharing'}
+    - {name: val_dataset_url, value: 'https://drive.google.com/file/d/172vMkaGKkol2x1juNzjWdEwNZrTyZnvz/view?usp=share_link'}
+    - {name: checkpoint_url, value: 'https://drive.google.com/drive/folders/1-C3N6h-CtdojHjEyFvXGXBorDFBo_k4z?usp=share_link'}
+    - {name: checkpoint_name, value: axial_ckpt.tf}
+    - {name: test_img_url, value: 'https://drive.google.com/file/d/13PzBr8jBjHdt4VMaEcEOkMoCF6VKpmx1/view?usp=share_link'}
+    - {name: model_size, value: '256'}
+    - {name: num_classes, value: '2'}
     - {name: num_epochs, value: '1'}
-    - {name: class_names, value: '["missing_hole", "mouse_bite", "open_circuit", "short",
-        "spur", "spurious_copper"]'}
+    - {name: class_names, value: '["negative", "positive"]'}
   serviceAccountName: pipeline-runner

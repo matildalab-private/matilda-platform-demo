@@ -9,16 +9,16 @@ import json
 ## Requires train and validation datasets in tfrecord format.
 ## We also need a comprehensive image of the pretrained weights and tests.
 ## Finally, enter class information, image size, and epochs.
-## Receiving the above information as a pipe [yolov3_pipeline] will be possible someday.
+## Receives the above information as a pipe [yolov3_pipeline].
 ## You can see it in line 219.
 
-def load_test_data(img_url: str, input_img: OutputPath('jpg')):
+def load_test_pcb_data(img_url: str, input_img: OutputPath('jpg')):
     import gdown
     gdown.download(img_url, output=input_img, quiet=True, fuzzy=True)
     print(f'download complete!')
 
 load_test_img_op = components.create_component_from_func(
-    load_test_data, 
+    load_test_pcb_data, 
     # output_component_file='./component-files-yaml/load_test_img_component.yaml',
     packages_to_install=['gdown']
 )
@@ -111,7 +111,7 @@ train_model_op = components.create_component_from_func(
     packages_to_install=['yolov3-minimal']
 )
 
-def load_train_data(
+def load_train_pcb_data(
     dataset_name : str,
     train_dataset_url: str, 
     val_dataset_url: str
@@ -121,7 +121,7 @@ def load_train_data(
     return(train_dataset_url, val_dataset_url)
 
 load_train_data_op = components.create_component_from_func(
-    load_train_data, 
+    load_train_pcb_data, 
     # output_component_file='./component-files-yaml/load_train_data_component.yaml',
     packages_to_install=['gdown']
 )
@@ -217,27 +217,27 @@ saved_model_op = components.create_component_from_func(
 @dsl.pipeline(name='YOLOv3 pipeline')
 def yolov3_pipeline(
     # brain tumor
-    # dataset_name = "brain tumor dataset",
-    # train_dataset_url="https://drive.google.com/file/d/1Sq0bph5QJE5U_x-qu8hUcjgiTONeBDy1/view?usp=sharing",
-    # val_dataset_url="https://drive.google.com/file/d/172vMkaGKkol2x1juNzjWdEwNZrTyZnvz/view?usp=share_link",
-    # checkpoint_url="https://drive.google.com/drive/folders/1-C3N6h-CtdojHjEyFvXGXBorDFBo_k4z?usp=share_link",
-    # checkpoint_name="axial_ckpt.tf",
-    # test_img_url="https://drive.google.com/file/d/13PzBr8jBjHdt4VMaEcEOkMoCF6VKpmx1/view?usp=share_link",
-    # model_size='256',
-    # num_classes='2',
-    # num_epochs='1',
-    # class_names='["negative", "positive"]'
-    # pcb defect
     dataset_name = "pcb defect dataset",
-    train_dataset_url="https://drive.google.com/file/d/1qn0mLFV7NBbmw6-ZTuF_tN_oJxRHx-XR/view?usp=sharing",
-    val_dataset_url="https://drive.google.com/file/d/1gUCWhls3ZyVurdYFl1iikRUlDHmKi4ZQ/view?usp=sharing",
-    checkpoint_url="https://drive.google.com/drive/folders/1btey4JhgBRkoJneGKkvBLTDAuOMfPNmV?usp=share_link",
-    checkpoint_name="yolov3_train_30.tf",
-    test_img_url="https://drive.google.com/file/d/13SNqfX3z8N1-qt4PwaS4RL0O2SydN09j/view?usp=sharing",
-    model_size='416',
-    num_classes='6',
+    train_dataset_url="https://drive.google.com/file/d/1Sq0bph5QJE5U_x-qu8hUcjgiTONeBDy1/view?usp=sharing",
+    val_dataset_url="https://drive.google.com/file/d/172vMkaGKkol2x1juNzjWdEwNZrTyZnvz/view?usp=share_link",
+    checkpoint_url="https://drive.google.com/drive/folders/1-C3N6h-CtdojHjEyFvXGXBorDFBo_k4z?usp=share_link",
+    checkpoint_name="axial_ckpt.tf",
+    test_img_url="https://drive.google.com/file/d/13PzBr8jBjHdt4VMaEcEOkMoCF6VKpmx1/view?usp=share_link",
+    model_size='256',
+    num_classes='2',
     num_epochs='1',
-    class_names='["missing_hole", "mouse_bite", "open_circuit", "short", "spur", "spurious_copper"]'
+    class_names='["negative", "positive"]'
+    # pcb defect
+    # dataset_name = "pcb defect dataset",
+    # train_dataset_url="https://drive.google.com/file/d/1qn0mLFV7NBbmw6-ZTuF_tN_oJxRHx-XR/view?usp=sharing",
+    # val_dataset_url="https://drive.google.com/file/d/1gUCWhls3ZyVurdYFl1iikRUlDHmKi4ZQ/view?usp=sharing",
+    # checkpoint_url="https://drive.google.com/drive/folders/1btey4JhgBRkoJneGKkvBLTDAuOMfPNmV?usp=share_link",
+    # checkpoint_name="yolov3_train_30.tf",
+    # test_img_url="https://drive.google.com/file/d/13SNqfX3z8N1-qt4PwaS4RL0O2SydN09j/view?usp=sharing",
+    # model_size='416',
+    # num_classes='6',
+    # num_epochs='1',
+    # class_names='["missing_hole", "mouse_bite", "open_circuit", "short", "spur", "spurious_copper"]'
 ):
 
     load_data_task = load_train_data_op(dataset_name, train_dataset_url, val_dataset_url)
@@ -275,4 +275,4 @@ def yolov3_pipeline(
     serve_op(test_task.output)
     saved_model_op(test_task.output)
 
-kfp.compiler.Compiler().compile(yolov3_pipeline, 'pipeline.yaml')
+kfp.compiler.Compiler().compile(yolov3_pipeline, 'brain_pipeline.yaml')

@@ -9,6 +9,7 @@ def load_train_data(train_dataset: OutputPath('Dataset'), val_dataset: OutputPat
     gdown.download(dataset_url, output=val_dataset, quiet=True, fuzzy=True)
     print(f'download complete!')
 
+
 components.create_component_from_func(
     load_train_data, 
     output_component_file='./component-files/load_train_data_component.yaml',
